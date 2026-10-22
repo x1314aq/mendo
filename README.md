@@ -22,11 +22,11 @@ winget install tanaton.mendo
 - **高速起動** — ウインドウ生成とファイル処理を並列化する事で高速起動します。
 - **省メモリ** — Markdownの描画にブラウザを使わず、Direct2D + DirectWrite で直接描画します。
 - **ライブリロード** — 表示中ファイルの変更を検出し、自動で表示を更新します。また、変更位置に自動スクロールします。
-- **Mermaid** — `mermaid` コードブロックを図として表示します。（WebView2 + Mermaid.js によるオフスクリーンレンダリング）
+- **Mermaid** — `mermaid` コードブロックを図として表示します。（Merman のプリビルド C ABI で SVG を生成し、LunaSVG でネイティブにラスタライズ）
 - **オフライン動作** — ネットワーク接続無しで動作します。
 - **シンタックスハイライト** — 複数のプログラミング言語や設定ファイル等のコードブロックを色分け表示します。
 - **画像表示** — ローカルにあるPNG, JPEG, BMP等の画像を表示します。
-- **LaTeX** — `$$...$$` のブロック数式と ` ```math ` コードブロックを KaTeX で描画して表示します。（`$$...$$` は `$$...$$` のみからなる段落が対象。テキストと混在する段落は通常テキスト表示）
+- **LaTeX** — 現在のネイティブビルドでは未対応です。プリビルドの Merman C ABI に数式レンダラが含まれないため、`$$...$$` / ` ```math ` は図として描画されません。
 - **ナビゲーション履歴** — マウスサイドボタン / マウスジェスチャー / タッチパッドスワイプ等でブラウザスタイルの戻る/進むが動作し、スクロール位置も復元します。
 - **ドラッグ&ドロップ** — Markdownファイルをウィンドウにドロップして開けます。
 - **ファイル内検索** — タイトルバーの検索ボタンや `Ctrl+F` でファイル内を検索できます。
@@ -43,8 +43,8 @@ winget install tanaton.mendo
 | インラインコード | ✅ |
 | コードブロック (フェンス) | ✅ シンタックスハイライト付き。対応言語: C/C++, C#, Java, Kotlin, Swift, Python, JavaScript, TypeScript, Go, Rust, Zig, Haskell, Clojure, Emacs Lisp, Common Lisp, Scheme/Racket, Lua, Vim script, PHP, Ruby, SQL, HTML, XML, CSS, SCSS, JSON, YAML, TOML, INI, Bash, PowerShell, cmd (バッチ), Dockerfile, Makefile, diff |
 | 画像 (PNG / JPEG / BMP) | ✅ 非同期読み込み |
-| Mermaidダイアグラム | ✅ WebView2でレンダリング |
-| LaTeX数式 (`$$...$$` / ` ```math `) | ✅ ブロック数式のみ。`$$...$$` は段落が `$$...$$` のみで構成される場合に描画、他のテキストと混在する段落はテキスト表示 |
+| Mermaidダイアグラム | ✅ Merman + LunaSVG によるネイティブレンダリング |
+| LaTeX数式 (`$$...$$` / ` ```math `) | ❌ 現在のネイティブビルドでは未対応（Merman の math 機能がプリビルドに含まれないため） |
 | GitHub Alerts | ✅ Note / Tip / Important / Warning / Caution |
 | 脚注 (`[^1]`) | ✅ 文書末尾に番号順で表示、参照と定義を相互にリンク |
 | リンク (外部 / ページ内アンカー) | ✅ |
@@ -177,8 +177,8 @@ mendo.exe [ファイルパス | フォルダパス]
 | GUI | Win32 API |
 | 2D描画 | Direct2D (`ID2D1DeviceContext`) |
 | テキスト描画 | DirectWrite (`IDWriteTextLayout`) |
-| ダイアグラム | WebView2 + [Mermaid.js](https://mermaid.js.org/) |
-| 数式 | [KaTeX](https://katex.org/) (Mermaid経由) |
+| ダイアグラム | [Merman](https://github.com/Latias94/merman) + [LunaSVG](https://github.com/sammycage/lunasvg) |
+| 数式 | 現在のネイティブビルドでは未対応 |
 | Markdownパーサ | [md4c](https://github.com/mity/md4c) (SAX型コールバック) |
 | テスト | Google Test v1.18.0 |
 | ビルド | CMake 4.2+ |

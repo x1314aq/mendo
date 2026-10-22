@@ -6,8 +6,8 @@
 #include <string_view>
 #include <memory_resource>
 
-// mermaid.h は <WebView2.h> を transitively 引き込むため、mendo_core 入りの
-// モジュールは WebView2 依存を避けるべく本 interface を介する。
+// 具象レンダラのヘッダーが Merman / Direct2D を引き込むため、mendo_core 入りの
+// モジュールはこの interface を介する。
 class IMermaidRenderer {
 public:
     // SVG 取得結果コールバック。

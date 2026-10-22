@@ -66,16 +66,33 @@ SOFTWARE.
 
 ---
 
-## Microsoft WebView2 SDK
+## Merman
 
-- **Description**: Embeddable web view control for Windows
-- **Website**: https://developer.microsoft.com/en-us/microsoft-edge/webview2/
-- **License**: Microsoft Software License (redistributable)
-- **Obtained via**: CMake FetchContent (NuGet package)
-- **Usage**: Offscreen rendering of Mermaid diagrams
+- **Description**: Headless native Mermaid renderer (SVG output)
+- **Website**: https://github.com/Latias94/merman
+- **License**: MIT OR Apache-2.0
+- **Obtained via**: prebuilt Windows x64 C ABI artifact from the official
+  `merman` 0.9.2 Flutter package (`third_party/merman`)
+- **Usage**: Mermaid parsing, layout, and SVG generation
 
-The WebView2 SDK is subject to the Microsoft Software License Terms.
-See: https://www.nuget.org/packages/Microsoft.Web.WebView2/1.0.3967.48/License
+The prebuilt artifact's third-party notices are included at
+`third_party/merman/THIRD_PARTY_NOTICES.md`.
+
+## LunaSVG
+
+- **Description**: Native SVG rendering library
+- **Website**: https://github.com/sammycage/lunasvg
+- **License**: MIT
+- **Obtained via**: CMake FetchContent (v3.5.0, source build)
+- **Usage**: Rasterizes Merman's SVG output to a bitmap
+
+## PlutoVG
+
+- **Description**: 2D vector graphics library bundled with LunaSVG
+- **Website**: https://github.com/sammycage/plutovg
+- **License**: MIT
+- **Obtained via**: LunaSVG's bundled submodule (source build)
+- **Usage**: LunaSVG rasterizer backend
 
 ---
 

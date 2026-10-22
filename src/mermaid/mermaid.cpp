@@ -1,204 +1,194 @@
 #include "mermaid.h"
-#include "app_constants.h"
 #include "d2d_util.h"
 #include "file_io.h"
 #include "i18n.h"
-#include "mermaid_file_cache.h"
-#include "resource.h"
 #include "string_convert.h"
-#include "task_scheduler.h"
-#include "ui_constants.h"
-#include "utility.h"
 #include "wic_util.h"
-#include "win32_util.h"
-#include "win_handle.h"
+#include <lunasvg.h>
 #include <objidl.h>
 #include <shellscalingapi.h>
-#include <wrl/client.h>
-#include <wrl/event.h>
 #include <algorithm>
-#include <cstddef>
-#include <cstdint>
+#include <cmath>
 #include <limits>
+#include <mutex>
+#include <string>
 #include <utility>
 
+// EstimateWorkerDpr の GetDpiForMonitor 用。
 #pragma comment(lib, "shcore.lib")
-#pragma comment(lib, "windowscodecs.lib")
 
 namespace {
 
-bool SeekToBegin(IStream* stream) noexcept
+constexpr wchar_t kYaHeiPath[] = L"C:\\Windows\\Fonts\\msyh.ttc";
+constexpr wchar_t kSegoePath[] = L"C:\\Windows\\Fonts\\segoeui.ttf";
+constexpr wchar_t kArialPath[] = L"C:\\Windows\\Fonts\\arial.ttf";
+constexpr wchar_t kConsolasPath[] = L"C:\\Windows\\Fonts\\consola.ttf";
+
+void AddFont(const wchar_t* family, const wchar_t* path)
 {
-    const LARGE_INTEGER zero{};
-    return SUCCEEDED(stream->Seek(zero, STREAM_SEEK_SET, nullptr));
-}
-
-// size == 0 は空ストリームを要求する正当なユースケース（WebView2 CapturePreview の
-// 書き込み先バッファ用途）として許容するが、size > 0 && data == nullptr は呼び出し
-// 側バグなので nullptr を返して失敗させる。
-Microsoft::WRL::ComPtr<IStream> CreateMemoryStream(const void* data, size_t size)
-{
-    if (size > 0 && !data) {
-        return nullptr;
-    }
-    if (size > std::numeric_limits<ULONG>::max()) {
-        return nullptr;
-    }
-
-    Microsoft::WRL::ComPtr<IStream> stream;
-    if (FAILED(CreateStreamOnHGlobal(nullptr, TRUE, &stream)) || !stream) {
-        return nullptr;
-    }
-    if (size > 0) {
-        ULONG written = 0;
-        if (FAILED(stream->Write(data, static_cast<ULONG>(size), &written)) || written != size || !SeekToBegin(stream.Get())) {
-            return nullptr;
-        }
-    }
-    return stream;
-}
-
-constexpr std::wstring_view MERMAID_HOST_CLASS = L"mendo_MermaidHost";
-
-constexpr std::wstring_view APP_LOCAL_ORIGIN_PREFIX = L"https://app.local/";
-constexpr wchar_t APP_LOCAL_INDEX_URL[] = L"https://app.local/index.html";
-// res/mermaid.html の <script src> と一致させる
-constexpr std::wstring_view APP_LOCAL_MERMAID_JS_URL = L"https://app.local/mermaid.min.js";
-// mermaid.js に XSS があっても外へ通信させない。WebResourceRequested では WebSocket や Worker 発の
-// 通信を捕まえられないので、ページの CSP で止める。eval は mermaid の依存が使いうるので許す。
-constexpr wchar_t HTML_RESPONSE_HEADERS[] =
-    L"Content-Type: text/html; charset=utf-8\r\n"
-    L"Content-Security-Policy: default-src 'none'; script-src https://app.local 'unsafe-inline' 'unsafe-eval'; "
-    L"style-src 'unsafe-inline'; img-src data: blob:; font-src data:; worker-src 'none'; base-uri 'none'; form-action 'none'";
-
-// WebView2 は CapturePreview に IsVisible=TRUE を要求するため、非表示にせず画面外の遠い位置に置く。
-constexpr int HOST_OFFSCREEN_POS = -32000;
-// キャプチャ直前にダイアグラムの実寸へ合わせ直すので、それまでは小さく保つ。WebView2 は
-// この大きさの描画面を確保してラスタライズする (4096^2 だと 1 面で 64MB)。
-// ダイアグラムの寸法は CSS 幅だけで決まり、ビューポートの高さには依存しない。
-constexpr int HOST_SIZE = 256;
-
-void DisableWebViewChrome(ICoreWebView2* webview)
-{
-    Microsoft::WRL::ComPtr<ICoreWebView2Settings> settings;
-    LogHrFailure("get_Settings", webview->get_Settings(&settings));
-    if (!settings) {
+    if (GetFileAttributesW(path) == INVALID_FILE_ATTRIBUTES) {
         return;
     }
-    LogHrFailure("put_AreDevToolsEnabled", settings->put_AreDevToolsEnabled(FALSE));
-    LogHrFailure("put_IsStatusBarEnabled", settings->put_IsStatusBarEnabled(FALSE));
-    LogHrFailure("put_AreDefaultContextMenusEnabled", settings->put_AreDefaultContextMenusEnabled(FALSE));
-    LogHrFailure("put_AreDefaultScriptDialogsEnabled", settings->put_AreDefaultScriptDialogsEnabled(FALSE));
-    // メモリから配信する固定ページだけを開くので、SmartScreen の評判チェック (URL の外部送信) は要らない。
-    if (Microsoft::WRL::ComPtr<ICoreWebView2Settings8> settings8; SUCCEEDED(settings.As(&settings8))) {
-        LogHrFailure("put_IsReputationCheckingRequired", settings8->put_IsReputationCheckingRequired(FALSE));
+    char narrow_path[MAX_PATH * 3]{};
+    char narrow_family[128]{};
+    if (!WideCharToMultiByte(CP_UTF8, 0, path, -1, narrow_path, sizeof(narrow_path), nullptr, nullptr)) {
+        return;
     }
-}
-
-// ハンドラ型は add_XXX の引数型から推論する。登録トークンは解除しないので受け取らない。
-template <class WebView, class Handler, class Fn>
-void AddWebViewHandler(WebView* webview, const char* what, HRESULT (STDMETHODCALLTYPE WebView::*add)(Handler*, EventRegistrationToken*), Fn&& fn)
-{
-    LogHrFailure(what, (webview->*add)(Microsoft::WRL::Callback<Handler>(std::forward<Fn>(fn)).Get(), nullptr));
-}
-
-// app.local の外への遷移・新しいウィンドウ・権限要求・ダウンロードを止める。
-// 外部への通信そのものは WebResourceRequested と CSP で止める。
-void RestrictWebView(ICoreWebView2* webview)
-{
-    // clang-format off
-    AddWebViewHandler(
-        webview,
-        "add_NavigationStarting",
-        &ICoreWebView2::add_NavigationStarting,
-        [](ICoreWebView2*, ICoreWebView2NavigationStartingEventArgs* args) static -> HRESULT {
-            UniqueCoTaskMemStr uri;
-            if (SUCCEEDED(args->get_Uri(uri.put())) && uri) {
-                const std::wstring_view u(uri.get());
-                if (!u.starts_with(APP_LOCAL_ORIGIN_PREFIX) && u != L"about:blank") {
-                    args->put_Cancel(TRUE);
-                }
-            }
-            return S_OK;
-        }
-    );
-    // clang-format on
-
-    // clang-format off
-    AddWebViewHandler(
-        webview,
-        "add_NewWindowRequested",
-        &ICoreWebView2::add_NewWindowRequested,
-        [](ICoreWebView2*, ICoreWebView2NewWindowRequestedEventArgs* args) static -> HRESULT {
-            args->put_Handled(TRUE);
-            return S_OK;
-        }
-    );
-    // clang-format on
-
-    // カメラ・位置情報・クリップボード等の権限要求は、図の描画に要らないのですべて拒否する。
-    // clang-format off
-    AddWebViewHandler(
-        webview,
-        "add_PermissionRequested",
-        &ICoreWebView2::add_PermissionRequested,
-        [](ICoreWebView2*, ICoreWebView2PermissionRequestedEventArgs* args) static -> HRESULT {
-            args->put_State(COREWEBVIEW2_PERMISSION_STATE_DENY);
-            return S_OK;
-        }
-    );
-    // clang-format on
-
-    // blob: などからのダウンロードでファイルを保存させない。
-    if (Microsoft::WRL::ComPtr<ICoreWebView2_4> webview4; SUCCEEDED(webview->QueryInterface(IID_PPV_ARGS(&webview4)))) {
-        // clang-format off
-        AddWebViewHandler(
-            webview4.Get(),
-            "add_DownloadStarting",
-            &ICoreWebView2_4::add_DownloadStarting,
-            [](ICoreWebView2*, ICoreWebView2DownloadStartingEventArgs* args) static -> HRESULT {
-                args->put_Cancel(TRUE);
-                return S_OK;
-            }
-        );
-        // clang-format on
+    if (family && *family) {
+        WideCharToMultiByte(CP_UTF8, 0, family, -1, narrow_family, sizeof(narrow_family), nullptr, nullptr);
     }
+    lunasvg_add_font_face_from_file(narrow_family, false, false, narrow_path);
 }
 
-// CreateStreamOnHGlobal のストリームはアパートメントに縛られないので worker から読める。
-// HGLOBAL から直接写し、ゼロ埋めした中間バッファを挟まない。
-PngBytes ReadHGlobalStream(IStream* stream)
+void RegisterFontsOnce()
 {
+    static std::once_flag once;
+    std::call_once(once, [] {
+        AddFont(L"Microsoft YaHei UI", kYaHeiPath);
+        AddFont(L"Microsoft YaHei", kYaHeiPath);
+        AddFont(L"Segoe UI", kSegoePath);
+        AddFont(L"Arial", kArialPath);
+        AddFont(L"Consolas", kConsolasPath);
+        // 未知の font-family でも CJK を表示できるよう、空ファミリのフォールバックも入れる。
+        AddFont(L"", kYaHeiPath);
+    });
+}
+
+// merman_ffi.dll は exe と同じフォルダにある。DEPENDENTLOADFLAG で system32 以外の
+// 依存 DLL 検索が制限されているため、exe フォルダを明示して先にロードする。
+bool EnsureMermanDllLoaded()
+{
+    static const bool loaded = [] {
+        wchar_t path[MAX_PATH]{};
+        const DWORD len = GetModuleFileNameW(nullptr, path, MAX_PATH);
+        if (len == 0 || len == MAX_PATH) {
+            return false;
+        }
+        std::wstring dll(path, len);
+        const auto slash = dll.find_last_of(L"\\/");
+        if (slash == std::wstring::npos) {
+            return false;
+        }
+        dll.resize(slash + 1);
+        dll += L"merman_ffi.dll";
+        const HMODULE module = LoadLibraryExW(dll.c_str(), nullptr, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32);
+        return module != nullptr;
+    }();
+    return loaded;
+}
+
+struct DiagramColors {
+    const char* text;
+    const char* node_fill;
+    const char* node_border;
+    const char* edge;
+    const char* cluster_fill;
+    const char* cluster_border;
+    const char* edge_label;
+};
+
+DiagramColors ColorsFor(bool dark_mode) noexcept
+{
+    if (dark_mode) {
+        return { "#d4d4d4", "#252526", "#d4d4d4", "#d4d4d4", "#2d2d2d", "#555555", "#3c3c3c" };
+    }
+    return { "#24292e", "#ffffff", "#24292e", "#24292e", "#f6f8fa", "#d0d7de", "#eaeef2" };
+}
+
+// LunaSVG は merman が埋め込む <style> を適用しないため、主要な要素だけを
+// 明示的にスタイルする。Mermaid の図種ごとの細かな CSS はここでは扱わない。
+std::string BuildLunaCss(bool dark_mode)
+{
+    const DiagramColors c = ColorsFor(dark_mode);
+    std::string css;
+    css.reserve(1600);
+    css += "text{font-family:\"Microsoft YaHei UI\",\"Segoe UI\",sans-serif;font-size:14px;fill:";
+    css += c.text;
+    css += ";}";
+    css += ".node rect,.node circle,.node ellipse,.node polygon,.node path,.actor,.labelBox,.note,"
+           ".classGroup rect,.stateGroup rect{fill:";
+    css += c.node_fill;
+    css += ";stroke:";
+    css += c.node_border;
+    css += ";stroke-width:2px;}";
+    css += ".cluster rect,.cluster polygon{fill:";
+    css += c.cluster_fill;
+    css += ";stroke:";
+    css += c.cluster_border;
+    css += ";}";
+    css += ".edgePaths .path,.flowchart-link,.messageLine0,.messageLine1,.relation,.transition,"
+           ".state-edge,.edgePath path{stroke:";
+    css += c.edge;
+    css += ";fill:none;stroke-width:2px;}";
+    css += "marker path,.arrowMarkerPath,.arrowheadPath{fill:";
+    css += c.edge;
+    css += ";stroke:";
+    css += c.edge;
+    css += ";}";
+    css += ".edgeLabel rect,.labelBkg{fill:";
+    css += c.edge_label;
+    css += ";opacity:0.9;}";
+    css += ".edgeLabel text,.label text,.nodeLabel,.messageText,.loopText,.labelText{fill:";
+    css += c.text;
+    css += ";}";
+    css += "line,.lifeline,.actor-line{stroke:";
+    css += c.node_border;
+    css += ";}";
+    return css;
+}
+
+bool EncodePng(IWICImagingFactory* wic, const lunasvg::Bitmap& bitmap, PngBytes& png)
+{
+    if (!wic || bitmap.isNull()) {
+        return false;
+    }
+    Microsoft::WRL::ComPtr<IStream> stream;
+    if (FAILED(CreateStreamOnHGlobal(nullptr, TRUE, &stream))) {
+        return false;
+    }
+    Microsoft::WRL::ComPtr<IWICBitmapEncoder> encoder;
+    if (FAILED(wic->CreateEncoder(GUID_ContainerFormatPng, nullptr, &encoder)) ||
+        FAILED(encoder->Initialize(stream.Get(), WICBitmapEncoderNoCache))) {
+        return false;
+    }
+    Microsoft::WRL::ComPtr<IWICBitmapFrameEncode> frame;
+    if (FAILED(encoder->CreateNewFrame(&frame, nullptr)) || FAILED(frame->Initialize(nullptr))) {
+        return false;
+    }
+    const UINT width = static_cast<UINT>(bitmap.width());
+    const UINT height = static_cast<UINT>(bitmap.height());
+    const UINT stride = static_cast<UINT>(bitmap.stride());
+    WICPixelFormatGUID format = GUID_WICPixelFormat32bppBGRA;
+    if (FAILED(frame->SetSize(width, height)) || FAILED(frame->SetPixelFormat(&format)) ||
+        FAILED(frame->WritePixels(height, stride, stride * height, bitmap.data())) ||
+        FAILED(frame->Commit()) || FAILED(encoder->Commit())) {
+        return false;
+    }
+
     STATSTG stat{};
-    HGLOBAL mem = nullptr;
-    if (FAILED(stream->Stat(&stat, STATFLAG_NONAME)) || stat.cbSize.QuadPart == 0 || FAILED(GetHGlobalFromStream(stream, &mem))) {
-        return nullptr;
+    if (FAILED(stream->Stat(&stat, STATFLAG_NONAME))) {
+        return false;
     }
-    const auto size = static_cast<size_t>(stat.cbSize.QuadPart);
-    if (size > GlobalSize(mem)) {
-        return nullptr;
+    HGLOBAL memory = nullptr;
+    if (FAILED(GetHGlobalFromStream(stream.Get(), &memory)) || !memory) {
+        return false;
     }
-    const auto* src = static_cast<const uint8_t*>(GlobalLock(mem));
-    if (!src) {
-        return nullptr;
+    auto* data = static_cast<const uint8_t*>(GlobalLock(memory));
+    if (!data) {
+        return false;
     }
-    auto png = std::make_shared<const std::pmr::vector<uint8_t>>(src, src + size);
-    GlobalUnlock(mem);
-    return png;
+    const size_t size = static_cast<size_t>(stat.cbSize.QuadPart);
+    auto bytes = std::make_shared<std::pmr::vector<uint8_t>>(data, data + size);
+    GlobalUnlock(memory);
+    png = std::move(bytes);
+    return true;
 }
 
-// 画面外でも表示中のトップレベルなので、外部ツールが本体の代わりにこれを閉じに来る (CloseMainWindow など)。
-// 自分は破棄されず、閉じる要求は本体へ回す。
-LRESULT CALLBACK HostWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
+std::pmr::wstring ToWide(std::string_view utf8)
 {
-    const HWND main = BindWindowInstance<HWND__>(hwnd, msg, lParam);
-    if (msg == WM_CLOSE) {
-        if (main) {
-            PostMessageW(main, WM_CLOSE, 0, 0);
-        }
-        return 0;
-    }
-    return DefWindowProcW(hwnd, msg, wParam, lParam);
+    std::pmr::wstring wide;
+    string_convert::Utf8ToWide(utf8, wide);
+    return wide;
 }
 
 } // namespace
@@ -208,351 +198,41 @@ MermaidRenderer::~MermaidRenderer()
     Shutdown();
 }
 
-void MermaidRenderer::Shutdown()
-{
-    CancelPending();
-    latch_.Wait();
-    if (hwnd_) {
-        KillTimer(hwnd_, std::to_underlying(app_timer::Id::MERMAID_IDLE));
-    }
-    ReleaseWebView();
-}
-
-void MermaidRenderer::ReleaseWebView()
-{
-    for (auto& w : ActiveWorkers()) {
-        DestroyWorker(w);
-    }
-    worker_count_ = 0;
-    webview_env_.Reset();
-    lifecycle_.Reset();
-}
-
-void MermaidRenderer::Init(
-    HWND hwnd, IWICImagingFactory* wic,
-    TaskScheduler& bg_scheduler, UINT disk_loaded_msg,
-    const std::filesystem::path& user_data_folder, std::move_only_function<void()> on_update)
+void MermaidRenderer::Init(HWND hwnd, IWICImagingFactory* wic, TaskScheduler& bg_scheduler, UINT disk_loaded_msg,
+                           std::move_only_function<void()> on_update)
 {
     hwnd_ = hwnd;
     wic_factory_ = wic;
     bg_scheduler_ = &bg_scheduler;
     disk_loaded_msg_ = disk_loaded_msg;
-    if (!user_data_folder.empty()) {
-        user_data_folder_.assign(user_data_folder.native());
-    }
     on_update_ = std::move(on_update);
-}
+    dpr_ = EstimateWorkerDpr();
+    RegisterFontsOnce();
 
-// 確定仕様: WebView2 は図の描画要求が来てから起動し、ファイルの変更通知などで先に起動しない
-// (57621be4 で入れ、f181f428 で外した)。パースと描画が速く先に起動しても体感の差が出ず、
-// 図の無い文書の方が多いので、起動すれば数十 MB 常駐するプロセスを要るまで作らない。
-void MermaidRenderer::EnsureInitialized()
-{
-    if (!lifecycle_.TryMarkInitialized()) {
-        return;
+    std::string error;
+    merman_ready_ = EnsureMermanDllLoaded() && merman_.Initialize(error);
+    if (!merman_ready_) {
+        MENDO_TRACEF("Merman initialization failed: {}", error);
     }
-
-    // 最初は 1 つだけ起動し、待ちが溜まったら MaybeGrowWorkers で増やす。
-    worker_count_ = CreateWorkerWindow(0) ? 1 : 0;
-
-    if (worker_count_ == 0) {
-        // ワーカーウィンドウを 1 つも作れなければ初期化済みフラグを戻し、
-        // 次回 RequestRender/RequestSvg で再試行できるようにする。
-        // 既にキューされた SVG リクエストは失敗で完了させ in-flight 固着を防ぐ。
-        lifecycle_.Reset();
-        DrainPendingRequests(/*cancelled=*/false);
-        return;
-    }
-
-    // WebView2環境の生成失敗はタイマーリトライで対処されるため、
-    // ワーカーウィンドウ作成完了時点で（initialized は既にマーク済みで）次段へ進む。
-    CreateWebView2Environment();
-}
-
-bool MermaidRenderer::CreateWorkerWindow(int index)
-{
-    static std::once_flag class_register_flag;
-    std::call_once(class_register_flag, [] static {
-        WNDCLASSEXW wc{};
-        wc.cbSize = sizeof(wc);
-        wc.lpfnWndProc = HostWndProc;
-        wc.hInstance = GetModuleHandleW(nullptr);
-        wc.lpszClassName = MERMAID_HOST_CLASS.data();
-        RegisterClassExW(&wc);
-    });
-
-    auto& w = workers_[index];
-    w = Worker{};
-    w.hwnd = CreateWindowExW(
-        // 自前では何も描かないので、DWM のリダイレクト面 (ウィンドウ面積 x 4B) を確保させない。
-        WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_NOREDIRECTIONBITMAP,
-        MERMAID_HOST_CLASS.data(),
-        L"",
-        WS_POPUP,
-        HOST_OFFSCREEN_POS, HOST_OFFSCREEN_POS,
-        HOST_SIZE, HOST_SIZE,
-        nullptr, nullptr, GetModuleHandleW(nullptr), hwnd_);
-    if (!w.hwnd) {
-        return false;
-    }
-    // WebView2 が「可視」と認識するために表示が必要。
-    ShowWindow(w.hwnd, SW_SHOWNOACTIVATE);
-    return true;
-}
-
-MermaidRenderer::Worker* MermaidRenderer::FindIdleWorker() noexcept
-{
-    const auto workers = ActiveWorkers();
-    const auto it = std::ranges::find_if(workers, &Worker::IsIdle);
-    return it != workers.end() ? &*it : nullptr;
-}
-
-void MermaidRenderer::MaybeGrowWorkers()
-{
-    if (!webview_env_ || worker_count_ >= MAX_WORKERS || pending_requests_.empty()) {
-        return;
-    }
-    if (!std::ranges::all_of(ActiveWorkers(), [](const Worker& w) static { return w.ready && w.IsRendering(); })) {
-        return;
-    }
-    const int index = worker_count_;
-    if (!CreateWorkerWindow(index)) {
-        return;
-    }
-    ++worker_count_;
-    SetupWorker(index);
-}
-
-void MermaidRenderer::ScheduleIdleShutdown()
-{
-    if (!hwnd_ || worker_count_ == 0) {
-        return;
-    }
-    SetTimer(hwnd_, std::to_underlying(app_timer::Id::MERMAID_IDLE), editing_diagrams_ ? IDLE_SHUTDOWN_EDITING_MS : IDLE_SHUTDOWN_MS, nullptr);
-}
-
-void MermaidRenderer::SetEditingDiagrams(bool editing)
-{
-    if (std::exchange(editing_diagrams_, editing) != editing) {
-        // 張り済みの待ち時間を新しい長さで張り直す。描画中なら OnIdleTimer が見送り、完了時に張り直される。
-        ScheduleIdleShutdown();
+    if (file_cache_) {
+        file_cache_->SetDpr(dpr_);
     }
 }
 
-void MermaidRenderer::OnIdleTimer()
+float MermaidRenderer::EstimateWorkerDpr() noexcept
 {
-    KillTimer(hwnd_, std::to_underlying(app_timer::Id::MERMAID_IDLE));
-    if (!pending_requests_.empty()) {
-        return;
+    const HMONITOR monitor = MonitorFromPoint(POINT{ -32000, -32000 }, MONITOR_DEFAULTTONEAREST);
+    UINT dpi_x = 0;
+    UINT dpi_y = 0;
+    if (FAILED(GetDpiForMonitor(monitor, MDT_EFFECTIVE_DPI, &dpi_x, &dpi_y))) {
+        dpi_x = 0;
     }
-    // 起動途中や描画中のワーカーがあれば閉じない (非同期ハンドラが閉じたスロットを触らないように)。
-    if (!std::ranges::all_of(ActiveWorkers(), &Worker::IsIdle)) {
-        return;
-    }
-    // 次の要求で EnsureInitialized から作り直し、準備完了時の on_update_ で図を再要求させる。
-    ReleaseWebView();
-}
-
-void MermaidRenderer::DestroyWorker(Worker& w)
-{
-    if (w.controller) {
-        w.controller->Close();
-    }
-    if (w.hwnd) {
-        DestroyWindow(w.hwnd);
-    }
-    w = Worker{};
-}
-
-void MermaidRenderer::ResizeWorkerView(Worker& worker, int width, int height)
-{
-    worker.controller->put_Bounds(RECT{ 0, 0, width, height });
-    SetWindowPos(worker.hwnd, nullptr, HOST_OFFSCREEN_POS, HOST_OFFSCREEN_POS, width, height, SWP_NOZORDER | SWP_NOACTIVATE);
-}
-
-void MermaidRenderer::CreateWebView2Environment()
-{
-    const wchar_t* user_data = nullptr;
-    if (!user_data_folder_.empty()) {
-        std::error_code ec;
-        std::filesystem::create_directories(user_data_folder_, ec);
-        user_data = user_data_folder_.c_str();
-    }
-
-    // clang-format off
-    CreateCoreWebView2EnvironmentWithOptions(
-        nullptr,
-        user_data,
-        nullptr,
-        Microsoft::WRL::Callback<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler>(
-            [this](HRESULT result, ICoreWebView2Environment* env) -> HRESULT {
-                OnEnvironmentCreated(result, env);
-                return S_OK;
-            }
-        ).Get()
-    );
-    // clang-format on
-}
-
-void MermaidRenderer::OnEnvironmentCreated(HRESULT result, ICoreWebView2Environment* env)
-{
-    if (FAILED(result) || !env) {
-        // 前回プロセスがユーザーデータフォルダをまだ解放していない場合など
-        // に失敗する。タイマーで遅延リトライする。
-        if (env_retry_count_ < MAX_ENV_RETRIES && hwnd_) {
-            ++env_retry_count_;
-            SetTimer(hwnd_, std::to_underlying(app_timer::Id::MERMAID_INIT_RETRY), ENV_RETRY_INTERVAL_MS, nullptr);
-            return;
-        }
-        // リトライ上限。待機中リクエストを失敗で完了させてから状態を全リセットし、
-        // 次回 RequestRender/RequestSvg でクリーンに再初期化させる。リセットしないと
-        // initialized_ が立ったままで EnsureInitialized が二度と走らず、以後の
-        // リクエストが処理も失敗もされず in-flight 固着する。worker/env を残したまま
-        // 再 init するとリークするため Shutdown 経由で破棄する。
-        DrainPendingRequests(/*cancelled=*/false);
-        env_retry_count_ = 0;
-        Shutdown();
-        return;
-    }
-    env_retry_count_ = 0;
-    webview_env_ = env;
-
-    for (int i = 0; i < worker_count_; i++) {
-        SetupWorker(i);
-    }
-}
-
-void MermaidRenderer::OnInitRetryTimer()
-{
-    KillTimer(hwnd_, std::to_underlying(app_timer::Id::MERMAID_INIT_RETRY));
-    if (!webview_env_ && worker_count_ > 0) {
-        CreateWebView2Environment();
-    }
-}
-
-void MermaidRenderer::SetupWorker(int index)
-{
-    // clang-format off
-    webview_env_->CreateCoreWebView2Controller(
-        workers_[index].hwnd,
-        Microsoft::WRL::Callback<ICoreWebView2CreateCoreWebView2ControllerCompletedHandler>(
-            [this, index](HRESULT result, ICoreWebView2Controller* controller) -> HRESULT {
-                if (SUCCEEDED(result) && controller) {
-                    OnControllerCreated(index, controller);
-                }
-                return S_OK;
-            }
-        ).Get()
-    );
-    // clang-format on
-}
-
-void MermaidRenderer::OnControllerCreated(int index, ICoreWebView2Controller* controller)
-{
-    auto& w = workers_[index];
-    w.controller = controller;
-    if (FAILED(controller->get_CoreWebView2(&w.webview)) || !w.webview) {
-        w.controller.Reset();
-        return;
-    }
-
-    controller->put_Bounds(RECT{ 0, 0, HOST_SIZE, HOST_SIZE });
-    DisableWebViewChrome(w.webview.Get());
-    RestrictWebView(w.webview.Get());
-    RegisterWebViewHandlers(index);
-
-    // HTML + JS は WebResourceRequested ハンドラがメモリから配信する。
-    LogHrFailure("Navigate(initial)", w.webview->Navigate(APP_LOCAL_INDEX_URL));
-}
-
-void MermaidRenderer::RegisterWebViewHandlers(int index)
-{
-    ICoreWebView2* webview = workers_[index].webview.Get();
-
-    // clang-format off
-    AddWebViewHandler(
-        webview,
-        "add_WebMessageReceived",
-        &ICoreWebView2::add_WebMessageReceived,
-        [this, index](ICoreWebView2*, ICoreWebView2WebMessageReceivedEventArgs* args) -> HRESULT {
-            UniqueCoTaskMemStr msg;
-            if (SUCCEEDED(args->TryGetWebMessageAsString(msg.put())) && msg) {
-                DispatchWebMessage(index, mermaid_util::ParseWebMessage(msg.get()));
-            }
-            return S_OK;
-        }
-    );
-    // clang-format on
-
-    // レンダラ/ブラウザプロセスのクラッシュを放置するとワーカーが rendering=true の
-    // まま恒久的にビジー扱いになり、全ワーカー喪失で以後の図が Loading 固着する。
-    // clang-format off
-    AddWebViewHandler(
-        webview,
-        "add_ProcessFailed",
-        &ICoreWebView2::add_ProcessFailed,
-        [this, index](ICoreWebView2*, ICoreWebView2ProcessFailedEventArgs*) -> HRESULT {
-            RecoverWorker(index);
-            return S_OK;
-        }
-    );
-    // clang-format on
-
-    // 全URLをフィルタし、app.local 以外へのリクエストもここで遮断する。
-    // clang-format off
-    LogHrFailure("AddWebResourceRequestedFilter", webview->AddWebResourceRequestedFilter(L"*", COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL));
-    AddWebViewHandler(
-        webview,
-        "add_WebResourceRequested",
-        &ICoreWebView2::add_WebResourceRequested,
-        [this](ICoreWebView2*, ICoreWebView2WebResourceRequestedEventArgs* args) -> HRESULT {
-            OnWebResourceRequested(args);
-            return S_OK;
-        }
-    );
-    // clang-format on
-}
-
-void MermaidRenderer::OnWebResourceRequested(ICoreWebView2WebResourceRequestedEventArgs* args)
-{
-    Microsoft::WRL::ComPtr<ICoreWebView2WebResourceRequest> request;
-    args->get_Request(&request);
-    UniqueCoTaskMemStr uri;
-    const std::wstring_view url = SUCCEEDED(request->get_Uri(uri.put())) && uri ? std::wstring_view{ uri.get() } : std::wstring_view{};
-
-    const auto respond = [&](IStream* body, int status, const wchar_t* reason, const wchar_t* response_headers) {
-        Microsoft::WRL::ComPtr<ICoreWebView2WebResourceResponse> response;
-        webview_env_->CreateWebResourceResponse(body, status, reason, response_headers, &response);
-        args->put_Response(response.Get());
-    };
-
-    // NavigationStarting と判定を揃え、app.local.evil.com のような部分一致による
-    // サブドメイン経由の経路を塞ぐ。
-    if (!url.starts_with(APP_LOCAL_ORIGIN_PREFIX)) {
-        respond(nullptr, 403, L"Blocked", L"");
-        return;
-    }
-
-    // その他のパスにはHTMLテンプレート（res/mermaid.html）を配信する
-    const bool is_js = url == APP_LOCAL_MERMAID_JS_URL;
-    const auto body = LoadRcData(is_js ? IDR_MERMAID_JS : IDR_MERMAID_HTML);
-    Microsoft::WRL::ComPtr<IStream> stream;
-    if (!body.empty()) {
-        stream = CreateMemoryStream(body.data(), body.size());
-    }
-
-    // リソース欠落時は空ボディを200で返さず500を返して失敗を明示する
-    if (!stream) {
-        respond(nullptr, 500, L"Resource unavailable", L"");
-        return;
-    }
-    respond(stream.Get(), 200, L"OK", is_js ? L"Content-Type: text/javascript; charset=utf-8" : HTML_RESPONSE_HEADERS);
+    return DpiScaleFrom(static_cast<float>(dpi_x));
 }
 
 void MermaidRenderer::SetRenderTarget(ID2D1RenderTarget* render_target)
 {
     render_target_ = render_target;
-    // ビットマップを作れなかった・大きすぎたなど、旧デバイスで確定したエラーも捨てて再試行させる。
     cache_.Clear();
 }
 
@@ -564,7 +244,6 @@ void MermaidRenderer::InsertCache(uint64_t hash, CachedResult result)
     });
 }
 
-// 幅を混ぜないキーの結果は、いまの幅の上限より狭いときだけ使う。
 const MermaidRenderer::CachedResult* MermaidRenderer::FindCached(uint64_t code_hash, uint64_t width_free_hash, float max_width)
 {
     if (const auto* free = cache_.Find(width_free_hash); free && mermaid_util::IsWidthFree(free->width, max_width)) {
@@ -573,116 +252,9 @@ const MermaidRenderer::CachedResult* MermaidRenderer::FindCached(uint64_t code_h
     return cache_.Find(code_hash);
 }
 
-void MermaidRenderer::SetDiagramError(const RenderRequest& req, std::wstring_view msg)
-{
-    if (req.svg_only) {
-        return;
-    }
-    // DrawTextCmd の 255 文字上限とプレースホルダ高さ (約3行) に収まる長さ。
-    constexpr size_t MAX_ERROR_LEN = 200;
-    auto sanitized = mermaid_util::SanitizeErrorMessage(msg, MAX_ERROR_LEN);
-    if (sanitized.empty()) {
-        sanitized = i18n::S().diagram_error;
-    }
-    InsertCache(req.code_hash, CachedResult{ .error = std::move(sanitized) });
-}
-
-void MermaidRenderer::InvokeSvgCallbackIfAny(RenderRequest& req, std::pmr::wstring svg, bool cancelled)
-{
-    if (auto cb = std::move(req.svg_callback)) {
-        cb(std::move(svg), cancelled);
-    }
-}
-
-void MermaidRenderer::DrainPendingRequests(bool cancelled)
-{
-    // 待機中の SVG リクエストを完了させ、呼び出し元の in-flight フラグ固着を防ぐ。
-    while (!pending_requests_.empty()) {
-        auto& req = pending_requests_.front();
-        InvokeSvgCallbackIfAny(req, {}, cancelled);
-        ReleaseInflight(req);
-        pending_requests_.pop();
-    }
-}
-
-void MermaidRenderer::CancelPending()
-{
-    // SVG 専用リクエストのコールバックは cancelled=true で呼び、呼び出し元の状態をリセットさせる。
-    DrainPendingRequests(true);
-
-    // current_request の request_id が 0 に戻るため、処理中の非同期コールバックは
-    // ID 不一致で自動的に無視される。
-    // SVG コールバックの再入で worker_count_ が変わり得るため毎回読み直す。
-    for (int i = 0; i < worker_count_; i++) {
-        auto& w = workers_[i];
-        InvokeSvgCallbackIfAny(w.current_request, {}, true);
-        w.current_request = {};
-    }
-    inflight_.clear();
-
-    disk_results_.TakeAll();
-}
-
-void MermaidRenderer::DropQueued()
-{
-    std::queue<RenderRequest, std::pmr::deque<RenderRequest>> kept;
-    while (!pending_requests_.empty()) {
-        auto& req = pending_requests_.front();
-        if (req.svg_only) {
-            kept.push(std::move(req));
-        }
-        else {
-            ReleaseInflight(req);
-        }
-        pending_requests_.pop();
-    }
-    pending_requests_ = std::move(kept);
-}
-
-void MermaidRenderer::RecoverWorker(int index)
-{
-    auto& w = workers_[index];
-    // SVG は失敗完了で呼び出し元の in-flight 固着を防ぐ。PNG は捨てると再リクエストの
-    // 契機が無く図が Loading のまま固着するためキューに戻す。クラッシュを誘発する
-    // 入力での再起動ループは retried で 1 回に打ち切る。
-    InvokeSvgCallbackIfAny(w.current_request, {}, false);
-    bool failed = false;
-    if (w.IsRendering() && !w.current_request.svg_only) {
-        if (!w.current_request.retried) {
-            w.current_request.retried = true;
-            pending_requests_.push(std::move(w.current_request));
-        }
-        else {
-            // リトライ済みの再クラッシュ。エラー確定にしないと Loading 固着かつ
-            // 完了通知も出ないため、汎用エラーを設定して再描画させる。
-            SetDiagramError(w.current_request, {});
-            ReleaseInflight(w.current_request);
-            failed = true;
-        }
-    }
-    w.current_request = {};
-    w.ready = false;
-    // 死んだプロセスの webview/controller は再利用できない
-    if (w.controller) {
-        w.controller->Close();
-    }
-    w.controller.Reset();
-    w.webview.Reset();
-    // init_retries は ready 受信で 0 に戻る。連続クラッシュ時の無限再作成はここで止める。
-    if (webview_env_ && w.init_retries < MAX_WORKER_RETRIES) {
-        ++w.init_retries;
-        SetupWorker(index);
-    }
-    // ワーカー状態の復旧が済んでから呼び、再入 (recompute → RequestRender) を安全にする。
-    if (failed) {
-        NotifyUpdate();
-    }
-}
-
 void MermaidRenderer::ApplyResult(DiagramEntry& diagram_entry, const CachedResult& result)
 {
     if (!result.error.empty()) {
-        // 仮表示中の旧結果より、新しいコードのエラーを見せる。
         diagram_entry.ResetForRetry();
         diagram_entry.error = result.error;
         return;
@@ -694,15 +266,21 @@ void MermaidRenderer::ApplyResult(DiagramEntry& diagram_entry, const CachedResul
     diagram_entry.stale = false;
 }
 
-bool MermaidRenderer::RequestRender(
-    const Node& node,
-    DiagramEntry& diagram_entry,
-    float max_width, bool dark_mode)
+void MermaidRenderer::SetDiagramError(const RenderRequest& req, std::wstring_view msg)
 {
-    if (node.type != NodeType::Diagram) {
+    constexpr size_t MAX_ERROR_LEN = 200;
+    auto sanitized = mermaid_util::SanitizeErrorMessage(msg, MAX_ERROR_LEN);
+    if (sanitized.empty()) {
+        sanitized = i18n::S().diagram_error;
+    }
+    InsertCache(req.code_hash, CachedResult{ .error = std::move(sanitized) });
+}
+
+bool MermaidRenderer::RequestRender(const Node& node, DiagramEntry& diagram_entry, float max_width, bool dark_mode)
+{
+    if (node.type != NodeType::Diagram || !render_target_) {
         return false;
     }
-
     if (diagram_entry.code_hash == 0) {
         diagram_entry.code_hash = mermaid_util::DiagramCodeHash(node);
     }
@@ -716,7 +294,6 @@ bool MermaidRenderer::RequestRender(
         return false;
     }
 
-    // ディスクから読めなかったときは描画し直すので、ディスクに当たってもコードを持たせる。
     RenderRequest req{
         .code = std::pmr::string{ node.GetText() },
         .latex = node.code_language() == SyntaxLanguage::LatexMath,
@@ -725,10 +302,16 @@ bool MermaidRenderer::RequestRender(
         .code_hash = hash,
         .width_free_hash = width_free_hash,
     };
+    if (!merman_ready_) {
+        SetDiagramError(req, L"Merman native renderer is not available");
+        ReleaseInflight(req);
+        return false;
+    }
     if (file_cache_) {
         MermaidFileCache::CacheEntry fentry;
         std::filesystem::path png_path;
-        if (const auto key = file_cache_->LookupDiagram(diagram_entry.code_hash, max_width, dark_mode, fentry); key && file_cache_->LookupPath(*key, fentry, png_path)) {
+        if (const auto key = file_cache_->LookupDiagram(diagram_entry.code_hash, max_width, dark_mode, fentry);
+            key && file_cache_->LookupPath(*key, fentry, png_path)) {
             req.width_free = *key == width_free_hash;
             req.css_width = fentry.css_width;
             req.css_height = fentry.css_height;
@@ -736,47 +319,164 @@ bool MermaidRenderer::RequestRender(
             return false;
         }
     }
-
-    EnqueueWebRender(std::move(req));
+    EnqueueNativeRender(std::move(req));
     return false;
 }
 
-void MermaidRenderer::StartDiskLoad(RenderRequest req, std::filesystem::path png_path, Microsoft::WRL::ComPtr<IStream> captured_stream)
+void MermaidRenderer::RequestSvg(std::string_view code, float max_width, bool dark_mode, SvgCallback callback)
 {
-    const bool captured = captured_stream != nullptr;
+    std::string svg;
+    std::string error;
+    if (merman_ready_ && merman_.RenderSvg(code, max_width, dark_mode, svg, error)) {
+        callback(ToWide(svg), false);
+    } else {
+        callback({}, false);
+    }
+}
+
+void MermaidRenderer::EnqueueNativeRender(RenderRequest req)
+{
+    if (shutting_down_) {
+        ReleaseInflight(req);
+        return;
+    }
+    pending_requests_.push(std::move(req));
+    StartNextNativeRender();
+}
+
+void MermaidRenderer::StartNextNativeRender()
+{
+    if (native_busy_ || shutting_down_ || !merman_ready_ || !bg_scheduler_ || pending_requests_.empty()) {
+        return;
+    }
+    RenderRequest req = std::move(pending_requests_.front());
+    pending_requests_.pop();
+    native_busy_ = true;
+    const bool posted = bg_scheduler_->Post([this, req = std::move(req), guard = latch_.Acquire()]() mutable {
+        DiskLoad job;
+        job.req = std::move(req);
+        job.native = true;
+        RenderNative(job);
+        if (disk_results_.Push(std::move(job))) {
+            ::PostMessageW(hwnd_, disk_loaded_msg_, 0, 0);
+        }
+    });
+    if (!posted) {
+        native_busy_ = false;
+        SetDiagramError(req, L"Native renderer queue is unavailable");
+        ReleaseInflight(req);
+        NotifyUpdate();
+    }
+}
+
+void MermaidRenderer::RenderNative(DiskLoad& job)
+{
+    TaskScheduler::EnsureWorkerCom();
+    RegisterFontsOnce();
+
+    std::string code(job.req.code.data(), job.req.code.size());
+    if (job.req.latex) {
+        std::pmr::wstring wide = ToWide(code);
+        wide = mermaid_util::BuildLatexFlowchartCode(wide);
+        code = string_convert::WideToUtf8(wide);
+    }
+
+    std::string svg;
+    std::string error;
+    if (!merman_.RenderSvg(code, job.req.max_width, job.req.dark_mode, svg, error)) {
+        job.captured = true;
+        job.error = ToWide(error);
+        return;
+    }
+    if (!wic_factory_) {
+        job.captured = true;
+        job.error = L"WIC is unavailable";
+        return;
+    }
+
+    auto document = lunasvg::Document::loadFromData(svg.data(), svg.size());
+    if (!document) {
+        job.captured = true;
+        job.error = L"Failed to parse Mermaid SVG";
+        return;
+    }
+    const float css_width = document->width();
+    const float css_height = document->height();
+    if (!(css_width > 0.5f) || !(css_height > 0.5f)) {
+        job.captured = true;
+        job.error = L"Mermaid SVG has no size";
+        return;
+    }
+    document->applyStyleSheet(BuildLunaCss(job.req.dark_mode));
+
+    double scale = dpr_;
+    const double max_side = static_cast<double>(MAX_RASTER_SIDE);
+    const double requested_w = css_width * scale;
+    const double requested_h = css_height * scale;
+    if (std::max(requested_w, requested_h) > max_side) {
+        scale *= max_side / std::max(requested_w, requested_h);
+    }
+    const int pixel_width = std::clamp(static_cast<int>(std::ceil(css_width * scale)), 1, static_cast<int>(MAX_RASTER_SIDE));
+    const int pixel_height = std::clamp(static_cast<int>(std::ceil(css_height * scale)), 1, static_cast<int>(MAX_RASTER_SIDE));
+
+    auto bitmap = document->renderToBitmap(pixel_width, pixel_height, 0x00000000);
+    if (bitmap.isNull()) {
+        job.captured = true;
+        job.error = L"Failed to rasterize Mermaid SVG";
+        return;
+    }
+    PngBytes png;
+    if (!EncodePng(wic_factory_.Get(), bitmap, png)) {
+        job.captured = true;
+        job.error = L"Failed to encode Mermaid PNG";
+        return;
+    }
+    auto decoded = wic_util::DecodeFromMemory(wic_factory_.Get(), *png, GUID_ContainerFormatPng);
+    if (!decoded) {
+        job.captured = true;
+        job.error = L"Failed to decode Mermaid PNG";
+        return;
+    }
+    job.bitmap = wic_util::DecodeToWicBitmap(wic_factory_.Get(), *decoded, { decoded->pixel_width, decoded->pixel_height });
+    if (!job.bitmap) {
+        job.captured = true;
+        job.error = L"Failed to create Mermaid bitmap";
+        return;
+    }
+    job.req.css_width = css_width;
+    job.req.css_height = css_height;
+    job.req.width_free = mermaid_util::IsWidthFree(css_width, job.req.max_width);
+    job.png = std::move(png);
+    job.captured = true;
+}
+
+void MermaidRenderer::StartDiskLoad(RenderRequest req, std::filesystem::path png_path)
+{
     const uint64_t hash = req.code_hash;
-    DiskLoad job{ .req = std::move(req), .captured_stream = std::move(captured_stream), .captured = captured };
-    // ファイル読み込みと PNG デコードは worker で行う (UI では時間予算なしに積み上がる)。
-    const bool posted = bg_scheduler_->Post([this, job = std::move(job), path = std::move(png_path), guard = latch_.Acquire()]() mutable {
+    if (!bg_scheduler_) {
+        inflight_.erase(hash);
+        return;
+    }
+    const bool posted = bg_scheduler_->Post([this, job = DiskLoad{ .req = std::move(req) }, path = std::move(png_path),
+                                               guard = latch_.Acquire()]() mutable {
         LoadDiskJob(job, path);
         if (disk_results_.Push(std::move(job))) {
             ::PostMessageW(hwnd_, disk_loaded_msg_, 0, 0);
         }
     });
     if (!posted) {
-        // 図は NeedsRender のまま残り次の走査で再要求される。
         inflight_.erase(hash);
     }
 }
 
 void MermaidRenderer::LoadDiskJob(DiskLoad& job, const std::filesystem::path& path)
 {
-    if (job.captured_stream) {
-        job.png = ReadHGlobalStream(job.captured_stream.Get());
-        job.captured_stream.Reset();
-        if (!job.png) {
-            return;
-        }
+    auto data = ReadAllBytes(path.c_str(), &job.read_error);
+    if (data.empty()) {
+        return;
     }
-    else {
-        auto data = ReadAllBytes(path.c_str(), &job.read_error);
-        if (data.empty()) {
-            return;
-        }
-        job.png = std::make_shared<const std::pmr::vector<uint8_t>>(std::move(data));
-    }
+    job.png = std::make_shared<const std::pmr::vector<uint8_t>>(std::move(data));
     TaskScheduler::EnsureWorkerCom();
-    // job.png はデコード完了まで生きているので、コピーせずに参照して読む。
     if (const auto decoded = wic_util::DecodeFromMemory(wic_factory_.Get(), *job.png, GUID_ContainerFormatPng)) {
         job.bitmap = wic_util::DecodeToWicBitmap(wic_factory_.Get(), *decoded, { decoded->pixel_width, decoded->pixel_height });
     }
@@ -785,27 +485,38 @@ void MermaidRenderer::LoadDiskJob(DiskLoad& job, const std::filesystem::path& pa
 bool MermaidRenderer::ApplyDiskLoad(DiskLoad& r)
 {
     Microsoft::WRL::ComPtr<ID2D1Bitmap> bitmap;
-    if (r.bitmap && render_target_ && SUCCEEDED(render_target_->CreateBitmapFromWicBitmap(r.bitmap.Get(), &bitmap)) && bitmap) {
+    if (r.bitmap && render_target_) {
+        render_target_->CreateBitmapFromWicBitmap(r.bitmap.Get(), &bitmap);
+    }
+    if (bitmap) {
         if (r.captured) {
-            r.req.width_free = mermaid_util::IsWidthFree(r.req.css_width, r.req.max_width);
             if (file_cache_) {
                 file_cache_->StoreAsync(r.req.CacheKey(), r.req.css_width, r.req.css_height, r.png);
             }
         }
-        InsertCache(r.req.CacheKey(), CachedResult{ std::move(bitmap), r.req.css_width, r.req.css_height, std::move(r.png) });
+        InsertCache(r.req.CacheKey(), CachedResult{ std::move(bitmap), r.req.css_width, r.req.css_height, r.png });
         ReleaseInflight(r.req);
+        if (r.native) {
+            native_busy_ = false;
+        }
         return true;
     }
-    // 描画直後の PNG を描き直しても同じ結果になるので、エラーを確定させて再要求させない。
+
     if (r.captured) {
-        SetDiagramError(r.req, {});
+        SetDiagramError(r.req, r.error);
         ReleaseInflight(r.req);
+        if (r.native) {
+            native_busy_ = false;
+        }
         return true;
     }
+
     if (file_cache_ && !r.png) {
         file_cache_->OnReadFailed(r.req.CacheKey(), r.read_error);
     }
-    EnqueueWebRender(std::move(r.req));
+    // ディスクに無かった/壊れていた図はネイティブ描画へ回す。
+    ReleaseInflight(r.req);
+    EnqueueNativeRender(std::move(r.req));
     return false;
 }
 
@@ -813,295 +524,30 @@ void MermaidRenderer::ProcessDiskLoads(std::chrono::steady_clock::time_point dea
 {
     bool resolved = false;
     disk_results_.Drain(deadline, [&](DiskLoad& r) { resolved |= ApplyDiskLoad(r); });
-    // まとめて 1 回だけ要求し直させる。
+    StartNextNativeRender();
     if (resolved) {
         NotifyUpdate();
     }
 }
 
-void MermaidRenderer::EnqueueWebRender(RenderRequest req)
+void MermaidRenderer::DropQueued()
 {
-    if (!lifecycle_.IsReady()) {
-        // 準備完了の通知で要求し直させる。
-        ReleaseInflight(req);
-        EnsureInitialized();
-        return;
-    }
-
-    pending_requests_.push(std::move(req));
-
-    ProcessQueue();
-}
-
-void MermaidRenderer::RequestSvg(std::string_view code, float max_width, bool dark_mode, SvgCallback callback)
-{
-    pending_requests_.push(RenderRequest{
-        .code = std::pmr::string{ code },
-        .max_width = max_width,
-        .dark_mode = dark_mode,
-        .svg_only = true,
-        .svg_callback = std::move(callback),
-    });
-
-    if (!lifecycle_.IsReady()) {
-        EnsureInitialized();
-        return;
-    }
-    ProcessQueue();
-}
-
-void MermaidRenderer::ProcessQueue()
-{
-    if (!lifecycle_.IsReady()) {
-        return;
-    }
-
-    // 同一コードの図が複数あるとき、最初の1つのレンダリング完了後に
-    // 残りをキャッシュから即座に解決できる。SVG 専用リクエストは PNG ビットマップ
-    // キャッシュ対象外なので常にワーカー経由でレンダリングする。
     while (!pending_requests_.empty()) {
-        auto& front = pending_requests_.front();
-        // 結果を出した要求が通知済みなので、ここでは取り除くだけでよい。
-        if (!front.svg_only && FindCached(front)) {
-            ReleaseInflight(front);
-            pending_requests_.pop();
-            continue;
-        }
-
-        Worker* idle = FindIdleWorker();
-        if (!idle) {
-            break;
-        }
-
-        idle->current_request = std::move(front);
+        ReleaseInflight(pending_requests_.front());
         pending_requests_.pop();
-        idle->current_request.request_id = ++request_counter_;
-        RenderInWorker(*idle);
-    }
-    MaybeGrowWorkers();
-    // 待ちが残っている間はアイドル扱いしない。描画中なら OnIdleTimer が見送り、完了時にここで張り直す。
-    if (pending_requests_.empty()) {
-        ScheduleIdleShutdown();
     }
 }
 
-void MermaidRenderer::FinishWorkerRequest(Worker& worker)
+void MermaidRenderer::Shutdown()
 {
-    const bool resolved = !worker.current_request.svg_only && FindCached(worker.current_request);
-    ReleaseInflight(worker.current_request);
-    worker.current_request = {};
-    ProcessQueue();
-    if (resolved) {
-        NotifyUpdate();
-    }
-}
-
-void MermaidRenderer::RenderInWorker(Worker& worker)
-{
-    if (!worker.webview) {
-        FinishWorkerRequest(worker);
+    if (shutting_down_) {
         return;
     }
-    const auto& req = worker.current_request;
-
-    // WebView2 / JsEscape は wstring 経路のため、ここで UTF-8 から変換する。
-    std::pmr::wstring code;
-    string_convert::Utf8ToWide(req.code, code);
-    if (req.latex) {
-        code = mermaid_util::BuildLatexFlowchartCode(code);
-    }
-
-    // CSS ビューポートが max_width (DIP) と等しくなるよう境界を物理ピクセルで設定する
-    // (WebView2 は内部で devicePixelRatio で除算する)。SVG 出力 (折返し等) も CSS 幅に
-    // 依存するため、PNG/SVG 両経路で同じ bounds を使う。
-    const int vp_phys = std::max(1, DipToPixelCeil(req.max_width, worker.dpr));
-    ResizeWorkerView(worker, vp_phys, HOST_SIZE);
-
-    // リクエスト ID を postMessage に含め、C++ 側でコールバックとリクエストを照合する。
-    // renderMermaid の maxWidth=0 は CSS 制約なし (ビューポートが制約する)。
-    const auto js = PmrFormat(
-        L"{}('{}', {}{})"
-        L".then(function(r){{window.chrome.webview.postMessage('{}:{}:'+(r||''));}})"
-        L".catch(function(e){{window.chrome.webview.postMessage('render-error:{}:'+String(e));}})",
-        req.svg_only ? L"renderMermaidSvg" : L"renderMermaid",
-        mermaid_util::JsEscape(code),
-        req.dark_mode ? L"true" : L"false",
-        req.svg_only ? L"" : L", 0",
-        req.svg_only ? L"svg-result" : L"render-result",
-        req.request_id, req.request_id);
-    LogHrFailure(req.svg_only ? "ExecuteScript(svg)" : "ExecuteScript(render)", worker.webview->ExecuteScript(js.c_str(), nullptr));
-}
-
-float MermaidRenderer::EstimateWorkerDpr() noexcept
-{
-    const HMONITOR monitor = MonitorFromPoint(POINT{ HOST_OFFSCREEN_POS, HOST_OFFSCREEN_POS }, MONITOR_DEFAULTTONEAREST);
-    UINT dpi_x = 0;
-    UINT dpi_y = 0;
-    if (FAILED(GetDpiForMonitor(monitor, MDT_EFFECTIVE_DPI, &dpi_x, &dpi_y))) {
-        dpi_x = 0;
-    }
-    return DpiScaleFrom(static_cast<float>(dpi_x));
-}
-
-void MermaidRenderer::OnWorkerReady(Worker& worker, float dpr)
-{
-    if (mermaid_util::IsPlausibleDpr(dpr)) {
-        worker.dpr = dpr;
-        // 拡大率の変更などで推定とずれていたら、以降のキャッシュは実際に描く DPR で引く。
-        if (file_cache_) {
-            file_cache_->SetDpr(dpr);
-        }
-    }
-    worker.ready = true;
-    worker.init_retries = 0;
-    // 初期化 (アイドル解放後の再初期化を含む) ごとに、最初のワーカーの準備完了で on_update_ を呼ぶ。
-    // 残りは準備でき次第プールに参加する。
-    if (!lifecycle_.IsReady()) {
-        lifecycle_.MarkReady();
-        NotifyUpdate();
-    }
-    ProcessQueue();
-}
-
-void MermaidRenderer::DispatchWebMessage(int index, const mermaid_util::ParsedWebMessage& parsed)
-{
-    using mermaid_util::WebMessageKind;
-    auto& w = workers_[index];
-    const auto& req = parsed.request;
-    const bool req_id_match = req.valid && req.id == w.current_request.request_id;
-    // payload は has_payload のときだけ設定され、それ以外は空 view。
-    const std::wstring_view payload = req.payload;
-    switch (parsed.kind) {
-    case WebMessageKind::Unknown:
-        return;
-    case WebMessageKind::Ready:
-        OnWorkerReady(w, parsed.ready_dpr);
-        return;
-    case WebMessageKind::RenderResult:
-        if (req_id_match && req.has_payload) {
-            OnRenderResult(index, payload);
-        }
-        return;
-    case WebMessageKind::CaptureReady:
-        if (req_id_match) {
-            DoCapturePreview(index);
-        }
-        return;
-    case WebMessageKind::SvgResult:
-        if (req_id_match && w.current_request.svg_only) {
-            InvokeSvgCallbackIfAny(w.current_request, std::pmr::wstring{ payload }, false);
-            FinishWorkerRequest(w);
-        }
-        return;
-    case WebMessageKind::RenderError:
-        if (req_id_match) {
-            SetDiagramError(w.current_request, payload);
-            InvokeSvgCallbackIfAny(w.current_request, {}, false);
-            FinishWorkerRequest(w);
-        }
-        return;
-    case WebMessageKind::Failed:
-        // mermaid.jsの読み込みに失敗した場合、ページを再読み込みして再試行する
-        if (w.init_retries < MAX_WORKER_RETRIES && w.webview) {
-            ++w.init_retries;
-            LogHrFailure("Navigate(retry)", w.webview->Navigate(APP_LOCAL_INDEX_URL));
-        }
-        return;
-    }
-    std::unreachable();
-}
-
-void MermaidRenderer::OnRenderResult(int worker_idx, std::wstring_view json)
-{
-    auto& w = workers_[worker_idx];
-
-    // 例: {"ok":true,"width":400,"height":300,"dpr":1.5}。リクエスト ID はメッセージハンドラで照合済み。
-    const float dw = mermaid_util::ParseJsonNumber(json, L"\"width\"");
-    const float dh = mermaid_util::ParseJsonNumber(json, L"\"height\"");
-    float dpr = mermaid_util::ParseJsonNumber(json, L"\"dpr\"");
-    if (!mermaid_util::IsPlausibleDpr(dpr)) {
-        dpr = 1.0f;
-    }
-    const bool ok = mermaid_util::ParseJsonTrueFlag(json, L"\"ok\"");
-
-    if (!ok || dw <= 0 || dh <= 0) {
-        // JS 側 renderMermaid が返す {ok:false, error:...} の内容をプレースホルダに
-        // 表示させる。放置すると「読み込み中」のまま固着する (issue #271)。
-        SetDiagramError(w.current_request, mermaid_util::ParseJsonString(json, L"\"error\""));
-        FinishWorkerRequest(w);
-        return;
-    }
-
-    // 描けない大きさのままキャプチャすると、毎回ビットマップ作成に失敗して描き直しを繰り返す。
-    if (!mermaid_util::FitsCaptureLimit(dw, dh, dpr, MaxBitmapDim(render_target_))) {
-        SetDiagramError(w.current_request, i18n::S().diagram_too_large);
-        FinishWorkerRequest(w);
-        return;
-    }
-
-    // CSS ピクセル寸法を描画サイズ (DIP) として後で使う。
-    w.current_request.css_width = dw;
-    w.current_request.css_height = dh;
-
-    // キャプチャ用に WebView をダイアグラムの正確な物理ピクセルサイズにリサイズする。
-    ResizeWorkerView(w, DipToPixelCeil(dw, dpr), DipToPixelCeil(dh, dpr));
-
-    // rAF 2 回で新サイズでの再描画を待ってから postMessage で通知する (Promise-await の問題を回避)。
-    const auto cap_js = PmrFormat(
-        L"requestAnimationFrame(function(){{requestAnimationFrame(function(){{"
-        L"window.chrome.webview.postMessage('capture-ready:{}');}});}});",
-        w.current_request.request_id);
-    LogHrFailure("ExecuteScript(capture)", w.webview->ExecuteScript(cap_js.c_str(), nullptr));
-}
-
-void MermaidRenderer::DoCapturePreview(int worker_idx)
-{
-    auto& w = workers_[worker_idx];
-    if (!w.webview) {
-        FinishWorkerRequest(w);
-        return;
-    }
-
-    auto png_stream = CreateMemoryStream(nullptr, 0);
-    if (!png_stream) {
-        FinishWorkerRequest(w);
-        return;
-    }
-
-    // CancelPending 後に到着した古いキャプチャ結果を request_id で弾く。
-    const unsigned int req_id = w.current_request.request_id;
-    const HRESULT hr = w.webview->CapturePreview(
-        COREWEBVIEW2_CAPTURE_PREVIEW_IMAGE_FORMAT_PNG,
-        png_stream.Get(),
-        Microsoft::WRL::Callback<ICoreWebView2CapturePreviewCompletedHandler>(
-            [this, worker_idx, png_stream, req_id](HRESULT capture_hr) -> HRESULT {
-        auto& worker = workers_[worker_idx];
-        if (worker.current_request.request_id != req_id) {
-            return S_OK;
-        }
-        if (SUCCEEDED(capture_hr)) {
-            OnCaptureComplete(worker_idx, png_stream);
-        }
-        else {
-            FinishWorkerRequest(worker);
-        }
-        return S_OK;
-    }).Get());
-
-    if (FAILED(hr)) {
-        FinishWorkerRequest(w);
-    }
-}
-
-void MermaidRenderer::OnCaptureComplete(int worker_idx, Microsoft::WRL::ComPtr<IStream> png_stream)
-{
-    auto& w = workers_[worker_idx];
-    // PNG の読み出しとデコードはディスクキャッシュと同じ経路で worker に任せ、UI スレッドを塞がない。
-    // PNG バイト列は bitmap と同じ寿命でメモリ保持し、クリップボードコピーが
-    // 非同期/退避され得る file_cache に依存しないようにする。shared で in-memory
-    // キャッシュ・DiagramEntry・ディスク書き込みに共有する。
-    // 読み出しが終わるまで要求は inflight_ に残る (current_request を空にしてから終えるので外れない)。
-    auto req = std::exchange(w.current_request, {});
-    FinishWorkerRequest(w);
-    StartDiskLoad(std::move(req), {}, std::move(png_stream));
+    shutting_down_ = true;
+    DropQueued();
+    latch_.Wait();
+    merman_.Shutdown();
+    merman_ready_ = false;
+    bg_scheduler_ = nullptr;
+    native_busy_ = false;
 }

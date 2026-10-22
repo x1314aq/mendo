@@ -22,11 +22,11 @@ Type `mendo` into the File Explorer address bar and press Enter.
 - **Fast startup** — Window creation and file processing run in parallel for a quick launch.
 - **Low memory usage** — Markdown is drawn directly with Direct2D + DirectWrite, without a browser engine.
 - **Live reload** — Detects changes to the open file, updates the view automatically, and scrolls to the changed position.
-- **Mermaid** — Renders `mermaid` code blocks as diagrams (offscreen rendering via WebView2 + Mermaid.js).
+- **Mermaid** — Renders `mermaid` code blocks as diagrams (prebuilt Merman C ABI + native LunaSVG rasterization).
 - **Offline** — Works without a network connection.
 - **Syntax highlighting** — Colors code blocks in many programming languages, configuration file formats, and more.
 - **Images** — Displays local PNG, JPEG, BMP, and other images.
-- **LaTeX** — Renders `$$...$$` block equations and ` ```math ` code blocks with KaTeX. (For `$$...$$`, only paragraphs consisting solely of `$$...$$` are rendered; paragraphs mixing math with other text are shown as plain text.)
+- **LaTeX** — Not supported in the current native build. The prebuilt Merman C ABI does not include a math renderer, so `$$...$$` / ` ```math ` are not rendered as diagrams.
 - **Navigation history** — Browser-style back/forward via mouse side buttons, mouse gestures, touchpad swipe, and more, with scroll position restored.
 - **Drag & Drop** — Drop a Markdown file onto the window to open it.
 - **In-file search** — Search within the file from the title bar search button or `Ctrl+F`.
@@ -43,8 +43,8 @@ Type `mendo` into the File Explorer address bar and press Enter.
 | Inline code | Supported |
 | Fenced code blocks | Supported (with syntax highlighting). Languages: C/C++, C#, Java, Kotlin, Swift, Python, JavaScript, TypeScript, Go, Rust, Zig, Haskell, Clojure, Emacs Lisp, Common Lisp, Scheme/Racket, Lua, Vim script, PHP, Ruby, SQL, HTML, XML, CSS, SCSS, JSON, YAML, TOML, INI, Bash, PowerShell, cmd (batch), Dockerfile, Makefile, diff |
 | Images (PNG / JPEG / BMP) | Supported (async loading) |
-| Mermaid diagrams | Supported (WebView2 rendering) |
-| LaTeX math (`$$...$$` / ` ```math `) | Supported for block equations only. `$$...$$` is rendered when the paragraph consists solely of a `$$...$$` block; mixed paragraphs fall back to plain text. |
+| Mermaid diagrams | Supported (native Merman + LunaSVG rendering) |
+| LaTeX math (`$$...$$` / ` ```math `) | Not supported in the current native build (the prebuilt Merman artifact omits math). |
 | GitHub Alerts | Supported (Note / Tip / Important / Warning / Caution) |
 | Footnotes (`[^1]`) | Supported (listed at the end of the document, with links between references and definitions) |
 | Links (external / page anchors) | Supported |
@@ -177,8 +177,8 @@ If there is no last opened file, open a file with `Ctrl+O` or drag & drop.
 | GUI | Win32 API |
 | 2D rendering | Direct2D (`ID2D1DeviceContext`) |
 | Text rendering | DirectWrite (`IDWriteTextLayout`) |
-| Diagrams | WebView2 + [Mermaid.js](https://mermaid.js.org/) |
-| Math | [KaTeX](https://katex.org/) (via Mermaid) |
+| Diagrams | [Merman](https://github.com/Latias94/merman) + [LunaSVG](https://github.com/sammycage/lunasvg) |
+| Math | Not supported in the current native build |
 | Markdown parser | [md4c](https://github.com/mity/md4c) (SAX-style callbacks) |
 | Tests | Google Test v1.18.0 |
 | Build | CMake 4.2+ |
