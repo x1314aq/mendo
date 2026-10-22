@@ -159,6 +159,19 @@ TEST(Theme, DarkAndLightDifferentColors)
     EXPECT_NE(light.text_color.r, dark.text_color.r);
 }
 
+// インラインコードの背景はコードブロックと同じ濃さにする。
+TEST(Theme, InlineCodeBackgroundMatchesCodeBlock)
+{
+    for (const auto& [name, get] : kBothThemes) {
+        SCOPED_TRACE(name);
+        const Theme& t = get();
+        EXPECT_FLOAT_EQ(t.inline_code_bg_color.r, t.code_bg_color.r);
+        EXPECT_FLOAT_EQ(t.inline_code_bg_color.g, t.code_bg_color.g);
+        EXPECT_FLOAT_EQ(t.inline_code_bg_color.b, t.code_bg_color.b);
+        EXPECT_FLOAT_EQ(t.inline_code_bg_color.a, t.code_bg_color.a);
+    }
+}
+
 // ---- ApplyZoom ----
 
 TEST(Theme, ApplyZoomScalesLayoutValues)

@@ -61,6 +61,8 @@ namespace {
 void ApplySharedColors(Theme& t, const theme_palette::SharedColors& p)
 {
     t.code_bg_color = D2D1::ColorF(p.code_bg);
+    // インラインコードの背景もコードブロックと同じ濃さにする。
+    t.inline_code_bg_color = t.code_bg_color;
     t.code_text_color = D2D1::ColorF(p.code_text);
     t.syntax_keyword = D2D1::ColorF(p.syntax_keyword);
     t.syntax_type = D2D1::ColorF(p.syntax_type);
@@ -128,8 +130,6 @@ Theme BuildLightTheme()
     Theme t{};
 
     t.bg_color = D2D1::ColorF(0xFFFFFF);
-    // GitHub のインラインコード背景 rgba(129,139,152,0.12) を白地に重ねた色。
-    t.inline_code_bg_color = D2D1::ColorF(0xf0f1f2);
     t.text_color = D2D1::ColorF(0x24292e);
     t.heading_color = D2D1::ColorF(0x1a1a1a);
     t.link_color = D2D1::ColorF(0x0366d6);
@@ -177,8 +177,6 @@ Theme BuildDarkTheme()
     Theme t{};
 
     t.bg_color = D2D1::ColorF(0x1e1e1e);
-    // GitHub のインラインコード背景 rgba(101,108,118,0.2) を bg_color に重ねた色。
-    t.inline_code_bg_color = D2D1::ColorF(0x2c2e30);
     t.text_color = D2D1::ColorF(0xd4d4d4);
     t.heading_color = D2D1::ColorF(0xe0e0e0);
     t.link_color = D2D1::ColorF(0x569cd6);

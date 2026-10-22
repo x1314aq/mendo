@@ -23,7 +23,8 @@ struct SharedColors {
 };
 
 inline constexpr SharedColors kLight = {
-    .code_bg = 0xf6f8fa,
+    // コードブロックとインラインコードで共有する。白背景との差が分かる濃さにする。
+    .code_bg = 0xe6e9ed,
     .code_text = 0x24292e,
     .table_border = 0xd0d7de,
     .syntax_keyword = 0xaf00db,
