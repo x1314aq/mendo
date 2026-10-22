@@ -109,7 +109,7 @@ void ClipboardManager::CopyDiagramToClipboard(const Document& doc, int node_inde
         return;
     }
 
-    // Mermaid は SVG + 画像。SVG は WebView2 経由の非同期取得のためキャッシュ優先。
+    // Mermaid は SVG + 画像。ネイティブレンダラから SVG を同期的に取得する。
     if (const auto* hit = svg_cache_.Find(key)) {
         ++copy_generation_;
         EmitCopyResult(WriteClipboardDiagram(hwnd_, BuildDib(png), *hit));

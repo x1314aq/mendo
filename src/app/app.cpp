@@ -55,7 +55,8 @@ bool App::Init(HWND hwnd)
     InitSharedScheduler();
 
     file_cache_.SetCacheDir(config_.GetConfigPath(L"MermaidCache"));
-    file_cache_.Init(MermaidRenderer::EstimateWorkerDpr(), scheduler_);
+    const float initial_dpr = DpiScaleFrom(static_cast<float>(GetDpiForWindow(hwnd_)));
+    file_cache_.Init(initial_dpr, scheduler_);
     file_cache_.SetStoreCompletedCallback([hwnd = hwnd_] {
         // worker から呼ばれる。索引の更新は UI スレッドの SaveIndex に任せる。
         ::PostMessageW(hwnd, app_msg::MERMAID_INDEX_DIRTY, 0, 0);
@@ -74,11 +75,11 @@ bool App::Init(HWND hwnd)
         },
         host_);
 
-    mermaid_renderer_.Init(hwnd_, renderer_.GetWICFactory(), file_cache_, scheduler_, app_msg::MERMAID_DISK_LOADED,
-                           config_.GetConfigPath(L"WebView2Data"), [this]() {
+    mermaid_renderer_.Init(hwnd_, renderer_.GetWICFactory(), scheduler_, app_msg::MERMAID_DISK_LOADED, [this]() {
         // 結果を待っていた図を要求し直して反映する。
         resource_manager_.RequestMermaidRenders();
     });
+    mermaid_renderer_.SetDpr(initial_dpr);
 
     if (!image_loader_.Init(renderer_.GetWICFactory())) {
         MENDO_TRACE("ImageLoader::Init failed (WIC factory unavailable). Image rendering disabled.");
@@ -398,6 +399,9 @@ void App::OnMinimize()
 
 void App::OnDpiChanged(UINT dpi, const RECT* suggested)
 {
+    const float dpr = DpiScaleFrom(static_cast<float>(dpi));
+    file_cache_.SetDpr(dpr);
+    mermaid_renderer_.SetDpr(dpr);
     // reducer をプラットフォーム非依存に保つため、Win32 の RECT を PixelRect に詰め替える。
     const PixelRect rc{
         static_cast<int32_t>(suggested->left),

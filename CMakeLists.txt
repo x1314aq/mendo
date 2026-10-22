@@ -62,39 +62,38 @@ if(MENDO_USE_TRACY)
     endif()
 endif()
 
-# ---- WebView2 SDK（Mermaid図表レンダリング用） ----
-FetchContent_Declare(
-    webview2
-    URL https://www.nuget.org/api/v2/package/Microsoft.Web.WebView2/1.0.3967.48
-    DOWNLOAD_NO_EXTRACT FALSE
-)
-FetchContent_MakeAvailable(webview2)
-
-# 展開されたWebView2のヘッダーとライブラリのパスを設定。
-# NuGet パッケージは build/native/x64 と build/native/arm64 のみ提供。
-# Visual Studio ジェネレータでは CMAKE_GENERATOR_PLATFORM、それ以外は
-# CMAKE_SYSTEM_PROCESSOR を見て切り替える。
-set(WEBVIEW2_DIR "${webview2_SOURCE_DIR}")
-set(WEBVIEW2_INCLUDE "${WEBVIEW2_DIR}/build/native/include")
+# ---- Merman ネイティブ C ABI（Mermaid 図表レンダリング用） ----
+# Rust ツールチェーンは使わず、公式配布の Windows x64 向けビルド済み DLL をリンクする。
+# 配布物は SVG 出力のみを含むため、ラスタライズは LunaSVG で行う。
 if(CMAKE_GENERATOR_PLATFORM)
     set(_mendo_arch "${CMAKE_GENERATOR_PLATFORM}")
 else()
     set(_mendo_arch "${CMAKE_SYSTEM_PROCESSOR}")
 endif()
 string(TOLOWER "${_mendo_arch}" _mendo_arch)
-if(_mendo_arch MATCHES "^(x64|amd64)$")
-    set(WEBVIEW2_LIB_DIR "${WEBVIEW2_DIR}/build/native/x64")
-elseif(_mendo_arch MATCHES "^(arm64|aarch64)$")
-    set(WEBVIEW2_LIB_DIR "${WEBVIEW2_DIR}/build/native/arm64")
-else()
+if(NOT _mendo_arch MATCHES "^(x64|amd64)$")
     message(FATAL_ERROR
-        "mendo: unsupported architecture '${_mendo_arch}'. "
-        "WebView2 NuGet provides only x64 / arm64 binaries "
-        "(accepted names: x64, AMD64, ARM64, AArch64). "
-        "Visual Studio generator users should pass '-A x64' or '-A ARM64' "
-        "(e.g. 'cmake -A x64 -B build').")
+        "mendo: merman prebuilt C ABI is currently vendored for Windows x64 only.")
 endif()
 unset(_mendo_arch)
+
+set(MERMAN_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/third_party/merman")
+add_library(merman_ffi SHARED IMPORTED)
+set_target_properties(merman_ffi PROPERTIES
+    IMPORTED_LOCATION "${MERMAN_ROOT}/bin/x64/merman_ffi.dll"
+    IMPORTED_IMPLIB "${MERMAN_ROOT}/lib/x64/merman_ffi.lib"
+    INTERFACE_INCLUDE_DIRECTORIES "${MERMAN_ROOT}/include")
+add_library(merman::ffi ALIAS merman_ffi)
+
+# ---- LunaSVG（ネイティブ SVG ラスタライザ） ----
+# Merman の C ABI 配布物は PNG を含まないため、SVG を LunaSVG でラスタライズする。
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+set(LUNASVG_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+FetchContent_Declare(
+    lunasvg
+    URL https://github.com/sammycage/lunasvg/archive/refs/tags/v3.5.0.tar.gz
+)
+FetchContent_MakeAvailable(lunasvg)
 
 # ---- md4c（サードパーティ） ----
 # Document テキスト表現は UTF-8 (char) 固定。md4c は MD_CHAR=char で動作する。
@@ -192,24 +191,6 @@ endif()
 # 日本語パス配下では MSVC `/utf-8` と衝突するため。
 target_precompile_headers(mendo_core PRIVATE <pch.h>)
 
-# ---- mermaid（ESM 版、本体 + 遅延読み込みのチャンク） ----
-# third_party/mermaid からの相対パスをそのままリソース名にして埋め込み、URL のパスで引く。
-# 日本語パスを rc.exe に渡さないよう、ファイルは res/mendo.rc からの相対パスで書く。
-file(GLOB_RECURSE _mendo_mermaid_files CONFIGURE_DEPENDS
-    RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}/third_party/mermaid"
-    "${CMAKE_CURRENT_SOURCE_DIR}/third_party/mermaid/*.mjs")
-set(_mendo_mermaid_rc "")
-foreach(_f IN LISTS _mendo_mermaid_files)
-    # rc.exe は数字で始まる名前を数値 ID と読み、記号によっては名前を区切る
-    if(NOT _f MATCHES "^[A-Za-z][A-Za-z0-9._/-]*$")
-        message(FATAL_ERROR "mendo: '${_f}' cannot be used as an rc resource name.")
-    endif()
-    string(APPEND _mendo_mermaid_rc "${_f} RCDATA \"../third_party/mermaid/${_f}\"\n")
-endforeach()
-file(CONFIGURE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/generated/mermaid_esm.rc" CONTENT "${_mendo_mermaid_rc}")
-unset(_mendo_mermaid_files)
-unset(_mendo_mermaid_rc)
-
 # ---- メイン実行ファイル ----
 add_executable(mendo WIN32
     src/main.cpp
@@ -223,12 +204,18 @@ add_executable(mendo WIN32
     src/render/renderer_search.cpp
     src/render/d2d_render_backend.cpp
     src/mermaid/mermaid.cpp
+    src/mermaid/merman_abi.cpp
     res/mendo.rc
 )
-target_include_directories(mendo PRIVATE ${WEBVIEW2_INCLUDE} "${CMAKE_CURRENT_BINARY_DIR}/generated")
 target_link_libraries(mendo PRIVATE mendo_core comctl32 delayimp
-    "${WEBVIEW2_LIB_DIR}/WebView2LoaderStatic.lib"
+    merman_ffi lunasvg::lunasvg
 )
+# Merman の DLL は exe と同じフォルダへ配置する（インポートライブラリは lib/x64）。
+add_custom_command(TARGET mendo POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${MERMAN_ROOT}/bin/x64/merman_ffi.dll"
+        "$<TARGET_FILE_DIR:mendo>/merman_ffi.dll"
+    VERBATIM)
 # ファイルダイアログでしか使わないので、起動時にロードしない (約 1ms)。
 # comctl32 は検索の EDIT とツールチップを初めて作るときまで要らない。
 # shell32 はドロップ・外部で開く・設定フォルダの取得の予備でしか使わない。
@@ -237,7 +224,8 @@ target_link_options(mendo PRIVATE /DELAYLOAD:comdlg32.dll /DELAYLOAD:comctl32.dl
 # Downloads 等に置かれた偽 DLL を読んでしまう。遅延ロードにして、wWinMain 先頭の
 # SetDefaultDllDirectories (System32 限定) の後で解決させる。
 target_link_options(mendo PRIVATE
-    /DELAYLOAD:d2d1.dll /DELAYLOAD:dwrite.dll /DELAYLOAD:d3d11.dll /DELAYLOAD:dwmapi.dll /DELAYLOAD:uxtheme.dll
+    /DELAYLOAD:merman_ffi.dll /DELAYLOAD:d2d1.dll /DELAYLOAD:dwrite.dll /DELAYLOAD:d3d11.dll /DELAYLOAD:dwmapi.dll
+    /DELAYLOAD:uxtheme.dll
     /DEPENDENTLOADFLAG:0x800
 )
 # 自動生成マニフェストを無効化（RC経由で独自のマニフェストを提供するため）

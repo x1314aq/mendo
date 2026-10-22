@@ -13,7 +13,6 @@
 
 #define IDR_HELP_MD       302
 #define IDR_HELP_EN_MD    303
-#define IDR_MERMAID_HTML  304
 #define IDR_HELP_ZH_MD    305
 #define IDR_HELP_ZH_HANT_MD 306
 #define IDR_HELP_KO_MD    307
