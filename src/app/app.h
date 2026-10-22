@@ -172,6 +172,7 @@ public:
     void OnAppImageLoaded();
     void OnParseComplete();
     void OnMermaidDiskLoaded();
+    void OnMermaidIndexDirty();
     void OnFileListed();
     void OnCaptureChanged();
     void OnDestroy();

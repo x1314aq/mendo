@@ -2,6 +2,7 @@
 #include "utility.h"
 #include "worker_latch.h"
 #include <cstdint>
+#include <functional>
 #include <memory_resource>
 #include <mutex>
 #include <optional>
@@ -49,6 +50,9 @@ public:
     std::optional<uint64_t> LookupDiagram(uint64_t code_hash, float max_width, bool dark_mode, CacheEntry& entry);
     // png_data は表示側 (メモリキャッシュ / DiagramEntry) と共有し、書き込み用にコピーしない。
     void StoreAsync(uint64_t key, float css_width, float css_height, PngBytes png_data);
+    // PNG の書き込み完了を UI スレッドへ知らせる。worker スレッドから呼ばれるため、
+    // コールバック内では PostMessage などスレッドセーフな処理だけを行うこと。
+    void SetStoreCompletedCallback(std::function<void()> callback);
     void SaveIndex();
     // 索引と PNG をすべて消す。書き込み中の PNG は着地後に worker が消す。
     void Clear();
@@ -116,6 +120,10 @@ private:
     // 初回呼び出しで index.bin を読み込む唯一の入口。
     IndexState& Index();
     IndexState LoadIndex() const;
+    // index に載っていない PNG (異常終了・旧キー式の残骸) をディレクトリから消す。
+    void PruneOrphanPngFiles(const IndexState& index) const;
+    static std::optional<uint64_t> ParsePngKey(const std::filesystem::path& path) noexcept;
+    void NotifyStoreCompleted() noexcept;
     void EvictIfNeeded(IndexState& index, uint32_t new_png_size);
 
     // current_dpr_ を mix した内部キーを返す。DPR ごとにエントリを分離して
@@ -138,6 +146,9 @@ private:
 
     TaskScheduler* scheduler_ = nullptr;
     std::atomic<uint32_t> write_gen_{ 0 };
+    std::function<void()> store_completed_callback_;
+    // 複数の書き込み完了が重なってもコールバックを 1 回にまとめる。
+    std::atomic<bool> store_notify_pending_{ false };
 
     mutable std::mutex pending_mutex_;
     // 書き込み中のキー → 書き込み中に追い出されたか (true なら worker が書き込み後に PNG を消す)。

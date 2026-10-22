@@ -4,6 +4,7 @@
 #include "task_scheduler.h"
 #include "mermaid_util.h"
 #include "test_helpers.h"
+#include <atomic>
 #include <filesystem>
 #include <future>
 #include <initializer_list>
@@ -716,4 +717,45 @@ TEST_F(MermaidFileCacheTest, SetDprSwitchesKeySpace)
     cache_.SetDpr(1.0f);
     EXPECT_EQ(cache_.InternalKeyForTest(42), key_at_1x);
     EXPECT_TRUE(cache_.LookupDimensions(42, entry));
+}
+
+// index に載っていない PNG は読み込み時に掃除する。キャッシュ外のファイルは残す。
+TEST_F(MermaidFileCacheTest, LoadPrunesOrphanPngFiles)
+{
+    InitCache(1.0f);
+    cache_.StoreAsync(42, 400.0f, 300.0f, MakeDummyPng(64));
+    cache_.SaveIndex();
+    scheduler_.Shutdown();
+
+    const auto orphan = WriteTempFile(L"0000000000000001.png", "orphan");
+    const auto keep = WriteTempFile(L"keep.txt", "not a cache file");
+    ASSERT_TRUE(std::filesystem::exists(PngPathOf(42)));
+
+    scheduler_.Init(2);
+    auto fresh = std::make_unique<MermaidFileCache>();
+    fresh->SetCacheDir(temp_dir_);
+    fresh->Init(1.0f, scheduler_);
+
+    EXPECT_EQ(fresh->EntryCount(), 1u);
+    EXPECT_FALSE(std::filesystem::exists(orphan));
+    EXPECT_TRUE(std::filesystem::exists(PngPathOf(42)));
+    EXPECT_TRUE(std::filesystem::exists(keep));
+}
+
+// PNG の非同期書き込みが終わったら、UI スレッドへ保存を促す通知が来る。
+TEST_F(MermaidFileCacheTest, StoreCompletedCallbackRunsAfterPngWrite)
+{
+    InitCache(1.0f);
+    std::atomic<int> calls{ 0 };
+    cache_.SetStoreCompletedCallback([&calls] {
+        calls.fetch_add(1, std::memory_order_relaxed);
+    });
+
+    cache_.StoreAsync(1, 100.0f, 50.0f, MakeDummyPng(64));
+    scheduler_.Shutdown();
+
+    EXPECT_GE(calls.load(std::memory_order_relaxed), 1);
+    EXPECT_TRUE(std::filesystem::exists(PngPathOf(1)));
+
+    scheduler_.Init(2);
 }

@@ -536,6 +536,10 @@ LRESULT Win32Window::HandleAppNotification(UINT msg, WPARAM wParam, LPARAM lPara
         app_->OnMermaidDiskLoaded();
         return 0;
 
+    case app_msg::MERMAID_INDEX_DIRTY:
+        app_->OnMermaidIndexDirty();
+        return 0;
+
     case app_msg::FILE_LISTED:
         app_->OnFileListed();
         return 0;

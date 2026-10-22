@@ -45,9 +45,10 @@ inline constexpr UINT SEARCH_UNFOCUS = WM_APP + 5;
 inline constexpr UINT PARSE_COMPLETE = WM_APP + 6;
 inline constexpr UINT MERMAID_DISK_LOADED = WM_APP + 7;
 inline constexpr UINT FILE_LISTED = WM_APP + 8;
+inline constexpr UINT MERMAID_INDEX_DIRTY = WM_APP + 9;
 
 // 判定に [WM_APP, END) を使う。
-inline constexpr UINT END = WM_APP + 9;
+inline constexpr UINT END = WM_APP + 10;
 
 } // namespace app_msg
 
