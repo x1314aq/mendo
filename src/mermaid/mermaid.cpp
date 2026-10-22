@@ -207,13 +207,7 @@ void MermaidRenderer::Init(HWND hwnd, IWICImagingFactory* wic, TaskScheduler& bg
     disk_loaded_msg_ = disk_loaded_msg;
     on_update_ = std::move(on_update);
     dpr_ = EstimateWorkerDpr();
-    RegisterFontsOnce();
 
-    std::string error;
-    merman_ready_ = EnsureMermanDllLoaded() && merman_.Initialize(error);
-    if (!merman_ready_) {
-        MENDO_TRACEF("Merman initialization failed: {}", error);
-    }
     if (file_cache_) {
         file_cache_->SetDpr(dpr_);
     }
@@ -302,11 +296,6 @@ bool MermaidRenderer::RequestRender(const Node& node, DiagramEntry& diagram_entr
         .code_hash = hash,
         .width_free_hash = width_free_hash,
     };
-    if (!merman_ready_) {
-        SetDiagramError(req, L"Merman native renderer is not available");
-        ReleaseInflight(req);
-        return false;
-    }
     if (file_cache_) {
         MermaidFileCache::CacheEntry fentry;
         std::filesystem::path png_path;
@@ -325,9 +314,13 @@ bool MermaidRenderer::RequestRender(const Node& node, DiagramEntry& diagram_entr
 
 void MermaidRenderer::RequestSvg(std::string_view code, float max_width, bool dark_mode, SvgCallback callback)
 {
-    std::string svg;
     std::string error;
-    if (merman_ready_ && merman_.RenderSvg(code, max_width, dark_mode, svg, error)) {
+    if (!EnsureMermanInitialized(error)) {
+        callback({}, false);
+        return;
+    }
+    std::string svg;
+    if (merman_.RenderSvg(code, max_width, dark_mode, svg, error)) {
         callback(ToWide(svg), false);
     } else {
         callback({}, false);
@@ -346,7 +339,7 @@ void MermaidRenderer::EnqueueNativeRender(RenderRequest req)
 
 void MermaidRenderer::StartNextNativeRender()
 {
-    if (native_busy_ || shutting_down_ || !merman_ready_ || !bg_scheduler_ || pending_requests_.empty()) {
+    if (native_busy_ || shutting_down_ || !bg_scheduler_ || pending_requests_.empty()) {
         return;
     }
     RenderRequest req = std::move(pending_requests_.front());
@@ -369,10 +362,43 @@ void MermaidRenderer::StartNextNativeRender()
     }
 }
 
+bool MermaidRenderer::EnsureMermanInitialized(std::string& error)
+{
+    if (merman_ready_.load(std::memory_order_acquire)) {
+        return true;
+    }
+    if (merman_init_failed_.load(std::memory_order_acquire)) {
+        error = "Merman native renderer initialization previously failed";
+        return false;
+    }
+    const std::lock_guard lock(merman_init_mutex_);
+    if (merman_ready_.load(std::memory_order_acquire)) {
+        return true;
+    }
+    if (!EnsureMermanDllLoaded()) {
+        error = "merman_ffi.dll could not be loaded";
+        merman_init_failed_.store(true, std::memory_order_release);
+        return false;
+    }
+    if (!merman_.Initialize(error)) {
+        merman_init_failed_.store(true, std::memory_order_release);
+        return false;
+    }
+    merman_ready_.store(true, std::memory_order_release);
+    return true;
+}
+
 void MermaidRenderer::RenderNative(DiskLoad& job)
 {
     TaskScheduler::EnsureWorkerCom();
     RegisterFontsOnce();
+
+    std::string init_error;
+    if (!EnsureMermanInitialized(init_error)) {
+        job.captured = true;
+        job.error = ToWide(init_error);
+        return;
+    }
 
     std::string code(job.req.code.data(), job.req.code.size());
     if (job.req.latex) {
@@ -547,7 +573,7 @@ void MermaidRenderer::Shutdown()
     DropQueued();
     latch_.Wait();
     merman_.Shutdown();
-    merman_ready_ = false;
+    merman_ready_.store(false, std::memory_order_release);
     bg_scheduler_ = nullptr;
     native_busy_ = false;
 }
