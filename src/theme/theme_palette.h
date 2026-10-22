@@ -23,7 +23,7 @@ struct SharedColors {
 };
 
 inline constexpr SharedColors kLight = {
-    .code_bg = 0xf6f8fa,
+    .code_bg = 0xe6e9ed,
     .code_text = 0x24292e,
     .table_border = 0xd0d7de,
     .syntax_keyword = 0xaf00db,
