@@ -104,7 +104,7 @@ struct ContextMenu::Impl {
     Microsoft::WRL::ComPtr<IDWriteTextFormat> fmt_icon;
 
     // 同一フォントでの Show 連発時に IDWriteTextFormat の再生成を抑止するためのキー。
-    std::pmr::wstring cached_fmt_font_family;
+    std::pmr::wstring cached_fmt_latin_font;
     std::pmr::wstring cached_fmt_icon_font;
     float cached_fmt_font_size = 0.0f;
     // 文言の先頭ポインタ -> 幅。書式を作り直したら捨てる。

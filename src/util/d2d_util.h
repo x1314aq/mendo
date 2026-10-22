@@ -29,7 +29,7 @@ struct TextFormatSpec {
     const wchar_t* family = nullptr;
     DWRITE_FONT_WEIGHT weight = DWRITE_FONT_WEIGHT_NORMAL;
     float size = 0.0f;
-    const wchar_t* locale = L"ja-jp";
+    const wchar_t* locale = L"zh-cn";
     DWRITE_TEXT_ALIGNMENT text_align = DWRITE_TEXT_ALIGNMENT_LEADING;
     DWRITE_PARAGRAPH_ALIGNMENT para_align = DWRITE_PARAGRAPH_ALIGNMENT_NEAR;
     bool no_wrap = false;

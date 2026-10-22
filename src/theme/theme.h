@@ -33,7 +33,10 @@ struct Theme {
     D2D1_COLOR_F syntax_deleted;
 
     // フォント
+    // 本文 (簡体中文) のフォント。
     std::wstring font_family;
+    // 行内の英数字に使うフォント。中国語フォントの Latin 字形より英文の字幅と字面が揃う。
+    std::wstring latin_font;
     std::wstring monospace_font;
     std::wstring icon_font;
 

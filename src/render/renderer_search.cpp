@@ -1,4 +1,5 @@
 #include "renderer.h"
+#include "mixed_script_font.h"
 #include "ui_constants.h"
 #include "d2d_util.h"
 #include <algorithm>
@@ -63,6 +64,7 @@ IDWriteTextLayout* Renderer::AcquireSearchInputLayout(const SearchBarRenderState
         c = {};
         return nullptr;
     }
+    ApplyLatinFontRuns(c.layout.Get(), text, theme_.latin_font.c_str());
     if (underline.length > 0) {
         c.layout->SetUnderline(TRUE, underline);
     }
@@ -198,6 +200,10 @@ int Renderer::HitTestSearchInput(std::wstring_view query, float local_x, float m
             max_width,
             SEARCH_INPUT_HEIGHT,
             &layout);
+        // 表示用レイアウトと同じフォントで測らないと、英字を含む入力でキャレット位置がずれる。
+        if (layout) {
+            ApplyLatinFontRuns(layout.Get(), query, theme_.latin_font.c_str());
+        }
     }
     if (!layout) {
         return 0;

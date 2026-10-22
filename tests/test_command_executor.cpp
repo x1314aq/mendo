@@ -119,7 +119,7 @@ protected:
             specs.push_back({ st.id, st.color });
         }
         const auto brushes = MakeBrushes(rt.Get(), specs);
-        const auto layout = CreateTextLayout(text, L"Consolas", L"ja-jp", 1000.0f, 1000.0f);
+        const auto layout = CreateTextLayout(text, L"Consolas", L"zh-cn", 1000.0f, 1000.0f);
         ComPtr<ID2D1SolidColorBrush> black;
         rt->CreateSolidColorBrush(D2D1::ColorF(D2D1::ColorF::Black), &black);
         rt->BeginDraw();

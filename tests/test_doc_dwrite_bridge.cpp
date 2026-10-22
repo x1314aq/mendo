@@ -1,5 +1,8 @@
 #include <gtest/gtest.h>
 #include "doc_dwrite_bridge.h"
+#include "mixed_script_font.h"
+#include <utility>
+#include <vector>
 
 namespace {
 
@@ -209,4 +212,70 @@ TEST(DecodeForDWrite, ReplacesPreviousContent)
     EXPECT_EQ(out, L"ab");
     DecodeForDWrite("", out);
     EXPECT_TRUE(out.empty());
+}
+
+// ─────────────────────────────────────────────
+// ForEachLatinRun: 行内の ASCII 区間
+// ─────────────────────────────────────────────
+
+namespace {
+
+std::vector<std::pair<uint32_t, uint32_t>> LatinRuns(std::wstring_view text)
+{
+    std::vector<std::pair<uint32_t, uint32_t>> runs;
+    ForEachLatinRun(text, [&runs](uint32_t start, uint32_t length) {
+        runs.emplace_back(start, length);
+    });
+    return runs;
+}
+
+} // namespace
+
+TEST(ForEachLatinRun, EmptyTextHasNoRuns)
+{
+    EXPECT_TRUE(LatinRuns(L"").empty());
+}
+
+TEST(ForEachLatinRun, AsciiOnlyIsOneRun)
+{
+    const auto runs = LatinRuns(L"Hello, world!");
+    ASSERT_EQ(runs.size(), 1u);
+    EXPECT_EQ(runs[0].first, 0u);
+    EXPECT_EQ(runs[0].second, 13u);
+}
+
+TEST(ForEachLatinRun, CjkOnlyHasNoRuns)
+{
+    EXPECT_TRUE(LatinRuns(L"简体中文正文").empty());
+    EXPECT_TRUE(LatinRuns(L"，。！？").empty());
+}
+
+TEST(ForEachLatinRun, MixedTextKeepsCjkAndAsciiSeparate)
+{
+    // "中文 English 混排": 0-1 は漢字、2-10 は空白込みの ASCII、11-12 は漢字。
+    const auto runs = LatinRuns(L"中文 English 混排");
+    ASSERT_EQ(runs.size(), 1u);
+    EXPECT_EQ(runs[0].first, 2u);
+    EXPECT_EQ(runs[0].second, 9u);
+}
+
+TEST(ForEachLatinRun, AlternatingTextProducesMultipleRuns)
+{
+    const auto runs = LatinRuns(L"abc中文def");
+    ASSERT_EQ(runs.size(), 2u);
+    EXPECT_EQ(runs[0].first, 0u);
+    EXPECT_EQ(runs[0].second, 3u);
+    EXPECT_EQ(runs[1].first, 5u);
+    EXPECT_EQ(runs[1].second, 3u);
+}
+
+TEST(ForEachLatinRun, SurrogatePairIsNotLatin)
+{
+    // A + 😀 (UTF-16 2 units) + B
+    const auto runs = LatinRuns(L"A\xD83D\xDE00""B");
+    ASSERT_EQ(runs.size(), 2u);
+    EXPECT_EQ(runs[0].first, 0u);
+    EXPECT_EQ(runs[0].second, 1u);
+    EXPECT_EQ(runs[1].first, 3u);
+    EXPECT_EQ(runs[1].second, 1u);
 }

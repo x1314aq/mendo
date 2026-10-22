@@ -96,6 +96,7 @@ TEST(Theme, FontFamilyNotEmpty)
         SCOPED_TRACE(name);
         const Theme& t = get();
         EXPECT_FALSE(t.font_family.empty());
+        EXPECT_FALSE(t.latin_font.empty());
         EXPECT_FALSE(t.monospace_font.empty());
         EXPECT_FALSE(t.icon_font.empty());
     }
@@ -137,6 +138,7 @@ TEST(Theme, DarkAndLightShareLayout)
         EXPECT_FLOAT_EQ(light.font_size_h[i], dark.font_size_h[i]) << "h" << i + 1;
     }
     EXPECT_EQ(light.font_family, dark.font_family);
+    EXPECT_EQ(light.latin_font, dark.latin_font);
     EXPECT_EQ(light.monospace_font, dark.monospace_font);
     EXPECT_EQ(light.icon_font, dark.icon_font);
 }

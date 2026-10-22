@@ -2,6 +2,7 @@
 #include "brush_id.h"
 #include "doc_dwrite_bridge.h"
 #include "layout_computer.h"
+#include "mixed_script_font.h"
 #include "parallel_for.h"
 #include "profiler.h"
 #include "syntax.h"
@@ -172,7 +173,7 @@ HRESULT CreateFormat(IDWriteFactory* factory, const wchar_t* family, float size,
     return factory->CreateTextFormat(
         family, nullptr, weight,
         DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
-        size, L"ja-jp", out);
+        size, L"zh-cn", out);
 }
 
 // 1 属性ぶんのレンジビルダ。隣接ランで属性が連続する間はマージし、切れたら emit する。
@@ -247,24 +248,26 @@ void DWriteTextMeasurer::WarmUp(TaskScheduler& scheduler) const
         return;
     }
     // 書式は参照を持って渡し、UI スレッドが作り直しても worker の途中で解放されないようにする。
-    const auto post = [&](ComPtr<IDWriteTextFormat> fmt) {
+    const wchar_t* const latin_font = theme_ ? theme_->latin_font.c_str() : nullptr;
+    const auto post = [&](ComPtr<IDWriteTextFormat> fmt, std::wstring_view sample, std::wstring latin_family) {
         if (!fmt) {
             return;
         }
-        scheduler.Post([factory = ComPtr<IDWriteFactory>(dwrite_), fmt = std::move(fmt)] {
+        scheduler.Post([factory = ComPtr<IDWriteFactory>(dwrite_), fmt = std::move(fmt),
+                        sample_text = std::wstring(sample.data(), sample.size()), latin_family = std::move(latin_family)] {
             MENDO_PROFILE("DWriteTextMeasurer::WarmUp");
-            constexpr std::wstring_view kSample = L"Aa1 日本語のテキスト";
             ComPtr<IDWriteTextLayout> layout;
-            if (SUCCEEDED(factory->CreateTextLayout(kSample.data(), static_cast<UINT32>(kSample.size()), fmt.Get(), layout::kNoWrapLayoutWidth, layout::kNoWrapLayoutWidth, &layout))) {
+            if (SUCCEEDED(factory->CreateTextLayout(sample_text.data(), static_cast<UINT32>(sample_text.size()), fmt.Get(), layout::kNoWrapLayoutWidth, layout::kNoWrapLayoutWidth, &layout))) {
+                ApplyLatinFontRuns(layout.Get(), sample_text, latin_family.c_str());
                 DWRITE_TEXT_METRICS metrics{};
                 layout->GetMetrics(&metrics);
             }
         });
     };
-    post(fmt_body_);
-    post(fmt_code_);
+    post(fmt_body_, L"Aa1 简体中文的示例文本", latin_font ? latin_font : L"");
+    post(fmt_code_, L"int main() { return 0; }", L"");
     // 見出しはサイズしか違わず、フォントの読み込みとフォールバックの解決は 1 つで済む。
-    post(fmt_h_[0]);
+    post(fmt_h_[0], L"简体中文标题", latin_font ? latin_font : L"");
 }
 
 bool DWriteTextMeasurer::RecreateFormats()
@@ -395,7 +398,9 @@ void DWriteTextMeasurer::MeasureNode(
 
     const auto& text = node.GetText();
     ComPtr<IDWriteTextLayout> layout;
-    if (FAILED(CreateDocTextLayout(dwrite_, text, GetTextFormat(node), layout_width, layout::kNoWrapLayoutWidth, &layout))) {
+    // コードブロックは等幅フォントを保つため、英数字の Latin フォント差し替えを行わない。
+    const wchar_t* const latin_family = (node.type == NodeType::CodeBlock) ? nullptr : theme_->latin_font.c_str();
+    if (FAILED(CreateDocTextLayout(dwrite_, text, GetTextFormat(node), layout_width, layout::kNoWrapLayoutWidth, &layout, latin_family))) {
         return;
     }
 
@@ -427,7 +432,7 @@ void DWriteTextMeasurer::BuildCellLayout(const NodeTableData& tbl, size_t r, siz
         return;
     }
     auto& cell_layout = tl.cell_layouts[tl.CellIndex(r, c)];
-    CreateDocTextLayout(dwrite_, text, row_fmt, layout::kNoWrapLayoutWidth, layout::kNoWrapLayoutWidth, &cell_layout);
+    CreateDocTextLayout(dwrite_, text, row_fmt, layout::kNoWrapLayoutWidth, layout::kNoWrapLayoutWidth, &cell_layout, theme_->latin_font.c_str());
     if (cell_layout) {
         ApplyRunFormatting(cell_layout.Get(), tbl.GetCellRuns(r, c), text, /*apply_code_size=*/true);
     }

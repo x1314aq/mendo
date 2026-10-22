@@ -72,7 +72,9 @@ inline UINT32 FetchHitTestMetrics(IDWriteTextLayout* layout, UINT32 start, UINT3
     return count;
 }
 
+// latin_family が非 null なら、ASCII の連続区間だけそのフォントで組む
+// (中文と英文の混在時に英文の字幅を揃えるため)。
 HRESULT CreateDocTextLayout(
     IDWriteFactory* factory, std::string_view text,
     IDWriteTextFormat* fmt, float max_w, float max_h,
-    IDWriteTextLayout** out);
+    IDWriteTextLayout** out, const wchar_t* latin_family = nullptr);

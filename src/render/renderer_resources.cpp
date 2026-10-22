@@ -163,7 +163,8 @@ void Renderer::ResolveThemeFonts()
     if (dw) {
         dw->GetSystemFontCollection(&collection, FALSE);
     }
-    theme_.font_family = ResolveFontFamily(collection.Get(), { theme_.font_family.c_str(), L"Meiryo UI", L"Segoe UI" });
+    theme_.font_family = ResolveFontFamily(collection.Get(), { theme_.font_family.c_str(), L"Microsoft YaHei UI", L"Microsoft YaHei", L"SimSun", L"Segoe UI" });
+    theme_.latin_font = ResolveFontFamily(collection.Get(), { theme_.latin_font.c_str(), L"Segoe UI", L"Arial" });
     theme_.monospace_font = ResolveFontFamily(collection.Get(), { theme_.monospace_font.c_str(), L"Consolas", L"Courier New" });
     theme_.icon_font = ResolveFontFamily(collection.Get(), { theme_.icon_font.c_str(), L"Segoe Fluent Icons", L"Segoe MDL2 Assets" });
 }
@@ -171,6 +172,7 @@ void Renderer::ResolveThemeFonts()
 void Renderer::AdoptThemeKeepingFonts(Theme theme)
 {
     theme.font_family = std::move(theme_.font_family);
+    theme.latin_font = std::move(theme_.latin_font);
     theme.monospace_font = std::move(theme_.monospace_font);
     theme.icon_font = std::move(theme_.icon_font);
     theme_ = std::move(theme);
@@ -195,20 +197,20 @@ void Renderer::RecreatePaneFormats()
 
     // clang-format off
     const FormatSpec specs[] = {
-        { &fmt_.icon_font,        { body_font, W,                            theme_.font_size_body,        L"ja-jp", TA_LEAD, PA_TOP, false } },
+        { &fmt_.icon_font,        { body_font, W,                            theme_.font_size_body,        L"zh-cn", TA_LEAD, PA_TOP, false } },
         { &fmt_.copy_btn_icon,    { icon_font, W,                            theme_.font_size_body,        L"en-us", TA_CTR,  PA_CTR, true  } },
-        { &fmt_.list_number,      { body_font, W,                            theme_.font_size_body,        L"ja-jp", TA_TAIL, PA_TOP, false } },
-        { &fmt_.placeholder_text, { body_font, W,                            theme_.font_size_body,        L"ja-jp", TA_CTR,  PA_CTR, false } },
-        { &fmt_.titlebar_text,    { body_font, W,                            TITLEBAR_TEXT_FONT_SIZE,      L"ja-jp", TA_CTR,  PA_CTR, true  } },
+        { &fmt_.list_number,      { body_font, W,                            theme_.font_size_body,        L"zh-cn", TA_TAIL, PA_TOP, false } },
+        { &fmt_.placeholder_text, { body_font, W,                            theme_.font_size_body,        L"zh-cn", TA_CTR,  PA_CTR, false } },
+        { &fmt_.titlebar_text,    { body_font, W,                            TITLEBAR_TEXT_FONT_SIZE,      L"zh-cn", TA_CTR,  PA_CTR, true  } },
         { &fmt_.titlebar_icon,    { icon_font, W,                            14.0f,                        L"en-us", TA_CTR,  PA_CTR, true  } },
         { &fmt_.pane_icon,        { icon_font, W,                            theme_.pane_font_size,        L"en-us", TA_CTR,  PA_CTR, true  } },
-        { &fmt_.pane_item,        { body_font, W,                            theme_.pane_font_size,        L"ja-jp", TA_LEAD, PA_CTR, true  } },
-        { &fmt_.pane_header,      { body_font, DWRITE_FONT_WEIGHT_SEMI_BOLD, theme_.pane_font_size,        L"ja-jp", TA_LEAD, PA_CTR, true  } },
-        { &fmt_.nav_button,       { body_font, W,                            theme_.pane_font_size,        L"ja-jp", TA_CTR,  PA_CTR, true  } },
-        { &fmt_.gesture_overlay,  { body_font, DWRITE_FONT_WEIGHT_BOLD,      32.0f * theme_.zoom,          L"ja-JP", TA_CTR,  PA_CTR, false } },
-        { &fmt_.toast_text,       { body_font, DWRITE_FONT_WEIGHT_SEMI_BOLD, theme_.pane_font_size * 1.1f, L"ja-JP", TA_CTR,  PA_CTR, true  } },
-        { &fmt_.search_input,     { body_font, W,                            SEARCH_INPUT_FONT_SIZE,       L"ja-jp", TA_LEAD, PA_CTR, true  } },
-        { &fmt_.search_count,     { body_font, W,                            SEARCH_COUNT_FONT_SIZE,       L"ja-jp", TA_CTR,  PA_CTR, true  } },
+        { &fmt_.pane_item,        { body_font, W,                            theme_.pane_font_size,        L"zh-cn", TA_LEAD, PA_CTR, true  } },
+        { &fmt_.pane_header,      { body_font, DWRITE_FONT_WEIGHT_SEMI_BOLD, theme_.pane_font_size,        L"zh-cn", TA_LEAD, PA_CTR, true  } },
+        { &fmt_.nav_button,       { body_font, W,                            theme_.pane_font_size,        L"zh-cn", TA_CTR,  PA_CTR, true  } },
+        { &fmt_.gesture_overlay,  { body_font, DWRITE_FONT_WEIGHT_BOLD,      32.0f * theme_.zoom,          L"zh-cn", TA_CTR,  PA_CTR, false } },
+        { &fmt_.toast_text,       { body_font, DWRITE_FONT_WEIGHT_SEMI_BOLD, theme_.pane_font_size * 1.1f, L"zh-cn", TA_CTR,  PA_CTR, true  } },
+        { &fmt_.search_input,     { body_font, W,                            SEARCH_INPUT_FONT_SIZE,       L"zh-cn", TA_LEAD, PA_CTR, true  } },
+        { &fmt_.search_count,     { body_font, W,                            SEARCH_COUNT_FONT_SIZE,       L"zh-cn", TA_CTR,  PA_CTR, true  } },
         { &fmt_.search_icon,      { icon_font, W,                            14.0f,                        L"en-us", TA_CTR,  PA_CTR, true  } },
     };
     // clang-format on
@@ -220,6 +222,7 @@ void Renderer::RecreatePaneFormats()
 
     // 全レイアウトは IDWriteTextFormat にバインドされているため format 再作成と同時に破棄する。
     text_layouts_.SetFactory(backend_.GetDWriteFactory());
+    text_layouts_.SetLatinFont(theme_.latin_font);
     search_input_ = {};
 
     cmd_generator_.SetFormats({ fmt_.list_number.Get(), fmt_.icon_font.Get(), fmt_.copy_btn_icon.Get(), fmt_.placeholder_text.Get() });

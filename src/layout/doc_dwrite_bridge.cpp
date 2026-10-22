@@ -1,4 +1,5 @@
 #include "doc_dwrite_bridge.h"
+#include "mixed_script_font.h"
 #include "utf8_codec.h"
 #include <algorithm>
 #include <emmintrin.h>
@@ -84,12 +85,15 @@ uint32_t Utf16OffsetCursor::ByteAt(uint32_t wide_target) noexcept
 HRESULT CreateDocTextLayout(
     IDWriteFactory* factory, std::string_view text,
     IDWriteTextFormat* fmt, float max_w, float max_h,
-    IDWriteTextLayout** out)
+    IDWriteTextLayout** out, const wchar_t* latin_family)
 {
     constexpr size_t kMaxRetainedChars = 8 * 1024;
     thread_local std::pmr::wstring wide;
     DecodeForDWrite(text, wide);
     const HRESULT hr = factory->CreateTextLayout(wide.data(), static_cast<UINT32>(wide.size()), fmt, max_w, max_h, out);
+    if (SUCCEEDED(hr) && out && *out) {
+        ApplyLatinFontRuns(*out, std::wstring_view{ wide.data(), wide.size() }, latin_family);
+    }
     if (wide.capacity() > kMaxRetainedChars) {
         std::pmr::wstring().swap(wide);
     }

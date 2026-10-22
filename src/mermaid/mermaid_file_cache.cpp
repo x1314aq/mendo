@@ -82,6 +82,7 @@ MermaidFileCache::IndexState& MermaidFileCache::Index()
 {
     if (!index_) {
         index_ = LoadIndex();
+        PruneOrphanPngFiles(*index_);
     }
     return *index_;
 }
@@ -150,8 +151,74 @@ void MermaidFileCache::IndexState::Remove(Map::iterator it) noexcept
     dirty = true;
 }
 
+std::optional<uint64_t> MermaidFileCache::ParsePngKey(const std::filesystem::path& path) noexcept
+{
+    if (path.extension() != L".png") {
+        return std::nullopt;
+    }
+    const std::wstring stem = path.stem().wstring();
+    if (stem.size() != 16) {
+        return std::nullopt;
+    }
+    uint64_t key = 0;
+    for (const wchar_t c : stem) {
+        uint32_t digit = 0;
+        if (c >= L'0' && c <= L'9') {
+            digit = static_cast<uint32_t>(c - L'0');
+        }
+        else if (c >= L'a' && c <= L'f') {
+            digit = static_cast<uint32_t>(c - L'a' + 10);
+        }
+        else if (c >= L'A' && c <= L'F') {
+            digit = static_cast<uint32_t>(c - L'A' + 10);
+        }
+        else {
+            return std::nullopt;
+        }
+        key = (key << 4) | digit;
+    }
+    return key;
+}
+
+void MermaidFileCache::PruneOrphanPngFiles(const IndexState& index) const
+{
+    if (cache_dir_.empty()) {
+        return;
+    }
+    std::error_code ec;
+    for (std::filesystem::directory_iterator it(cache_dir_, ec), end; !ec && it != end; it.increment(ec)) {
+        std::error_code file_ec;
+        if (!it->is_regular_file(file_ec) || file_ec) {
+            continue;
+        }
+        const auto key = ParsePngKey(it->path());
+        if (!key || index.entries.contains(*key)) {
+            continue;
+        }
+        std::error_code remove_ec;
+        std::filesystem::remove(it->path(), remove_ec);
+    }
+}
+
+void MermaidFileCache::SetStoreCompletedCallback(std::function<void()> callback)
+{
+    store_completed_callback_ = std::move(callback);
+}
+
+void MermaidFileCache::NotifyStoreCompleted() noexcept
+{
+    if (store_notify_pending_.exchange(true, std::memory_order_acq_rel)) {
+        return;
+    }
+    if (store_completed_callback_) {
+        store_completed_callback_();
+    }
+}
+
 void MermaidFileCache::SaveIndex()
 {
+    // 次に書き込みが完了したら再度通知を受けられるようにする。
+    store_notify_pending_.store(false, std::memory_order_release);
     // 未読み込みなら変更も無いので、空の索引でディスクを上書きしない。
     const auto path = GetIndexPath();
     if (path.empty() || !index_ || !index_->dirty) {
@@ -271,6 +338,7 @@ void MermaidFileCache::StoreAsync(uint64_t key, float css_width, float css_heigh
     index.Add(key, { css_width, css_height, png_size, index.NextLruSeq() });
 
     if (!scheduler_) {
+        NotifyStoreCompleted();
         return;
     }
 
@@ -317,6 +385,7 @@ void MermaidFileCache::StoreAsync(uint64_t key, float css_width, float css_heigh
 
         // 書き込み失敗時はキャッシュ未保存のままになるが、再生成可能なので致命的ではない
         (void)WriteAllBytes(path, data->data(), data->size());
+        NotifyStoreCompleted();
     });
     if (!posted) {
         // lambda 本体が走らず body 内 ScopeGuard は構築されないため pending_writes_ は解除されない。

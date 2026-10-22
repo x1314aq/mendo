@@ -50,6 +50,10 @@ bool App::Init(HWND hwnd)
 
     file_cache_.SetCacheDir(config_.GetConfigPath(L"MermaidCache"));
     file_cache_.Init(MermaidRenderer::EstimateWorkerDpr(), scheduler_);
+    file_cache_.SetStoreCompletedCallback([hwnd = hwnd_] {
+        // worker から呼ばれる。索引の更新は UI スレッドの SaveIndex に任せる。
+        ::PostMessageW(hwnd, app_msg::MERMAID_INDEX_DIRTY, 0, 0);
+    });
     mermaid_renderer_.SetFileCache(&file_cache_);
 
     clipboard_manager_.Init(hwnd_, &mermaid_renderer_, renderer_.GetWICFactory(), [this](std::wstring_view m) { ShowToast(m); });
@@ -403,6 +407,11 @@ void App::OnAppImageLoaded()
 void App::OnMermaidDiskLoaded()
 {
     mermaid_renderer_.ProcessDiskLoads();
+}
+
+void App::OnMermaidIndexDirty()
+{
+    file_cache_.SaveIndex();
 }
 
 void App::OnFileListed()

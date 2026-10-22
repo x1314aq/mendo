@@ -377,7 +377,7 @@ void AppendHighlightedCode(
 void AppendCodeBlockHtml(std::pmr::string& out, const Node& node, uint32_t start, uint32_t end, bool dark_mode)
 {
     constexpr std::string_view kStyleTail =
-        ";padding:12px;border-radius:4px;overflow:auto;font-family:Consolas,'Courier New',monospace;font-size:13px;line-height:1.45;\"><code>";
+        ";padding:12px;border-radius:4px;overflow:auto;font-family:'Cascadia Mono',Consolas,'Courier New',monospace;font-size:13px;line-height:1.45;\"><code>";
     constexpr std::string_view kClose = "</code></pre>";
 
     const auto& palette = PaletteFor(dark_mode);

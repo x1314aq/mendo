@@ -1,4 +1,5 @@
 #pragma once
+#include "mixed_script_font.h"
 #include <d2d1.h>
 #include <dwrite.h>
 #include <wrl/client.h>
@@ -23,6 +24,15 @@ public:
         entries_.clear();
     }
 
+    // 行内の英数字だけ Latin フォントに差し替えるためのフォント名。
+    void SetLatinFont(std::wstring_view family)
+    {
+        if (std::wstring_view{ latin_font_.data(), latin_font_.size() } != family) {
+            latin_font_.assign(family.data(), family.size());
+            entries_.clear();
+        }
+    }
+
     // 作れなければ nullptr。返したレイアウトは次の BeginFrame / SetFactory まで有効。
     IDWriteTextLayout* Get(IDWriteTextFormat* fmt, std::wstring_view text, D2D1_SIZE_F box)
     {
@@ -37,6 +47,7 @@ public:
         if (FAILED(factory_->CreateTextLayout(text.data(), static_cast<UINT32>(text.size()), fmt, box.width, box.height, &layout))) {
             return nullptr;
         }
+        ApplyLatinFontRuns(layout.Get(), text, latin_font_.c_str());
         auto* const raw = layout.Get();
         entries_.emplace(Key{ fmt, std::wstring(text), box.width, box.height }, Entry{ std::move(layout), frame_ });
         return raw;
@@ -115,6 +126,7 @@ private:
     };
 
     IDWriteFactory* factory_ = nullptr;
+    std::wstring latin_font_;
     uint32_t frame_ = 0;
     std::unordered_map<Key, Entry, KeyHash, KeyEqual> entries_;
 };

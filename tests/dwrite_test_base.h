@@ -50,7 +50,7 @@ protected:
             theme_.font_family.c_str(), nullptr,
             DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
             DWRITE_FONT_STRETCH_NORMAL, size,
-            L"ja-jp", &fmt);
+            L"zh-cn", &fmt);
         return fmt;
     }
 

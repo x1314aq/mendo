@@ -44,18 +44,18 @@ void ContextMenu::Impl::BuildItems(const ContextMenuParams& params)
 void ContextMenu::Impl::CreateTextFormats(const Theme& t)
 {
     if (fmt_text && fmt_icon &&
-        cached_fmt_font_family == std::wstring_view{ t.font_family } &&
+        cached_fmt_latin_font == std::wstring_view{ t.latin_font } &&
         cached_fmt_icon_font == std::wstring_view{ t.icon_font } &&
         cached_fmt_font_size == t.pane_font_size) {
         return;
     }
 
-    // 項目の文字はサイドペインの項目 (Renderer の pane_item) と同じ書式にする。
+    // メニュー文言は英語 UI が基本なので、本文 (中文) ではなく Latin フォントで組む。
     constexpr auto CENTER = DWRITE_PARAGRAPH_ALIGNMENT_CENTER;
-    fmt_text = CreateTextFormat(dwrite_factory, { .family = t.font_family.c_str(), .size = t.pane_font_size, .para_align = CENTER, .no_wrap = true });
+    fmt_text = CreateTextFormat(dwrite_factory, { .family = t.latin_font.c_str(), .size = t.pane_font_size, .para_align = CENTER, .no_wrap = true });
     fmt_icon = CreateTextFormat(dwrite_factory, { .family = t.icon_font.c_str(), .size = ICON_FONT_SIZE, .text_align = DWRITE_TEXT_ALIGNMENT_CENTER, .para_align = CENTER, .no_wrap = true });
 
-    cached_fmt_font_family.assign(t.font_family.begin(), t.font_family.end());
+    cached_fmt_latin_font.assign(t.latin_font.begin(), t.latin_font.end());
     cached_fmt_icon_font.assign(t.icon_font.begin(), t.icon_font.end());
     cached_fmt_font_size = t.pane_font_size;
     text_widths.clear();
