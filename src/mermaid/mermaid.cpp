@@ -137,7 +137,7 @@ std::string BuildLunaCss(bool dark_mode)
     return css;
 }
 
-bool RasterizeSvg(IWICImagingFactory* wic, std::string_view svg, bool dark_mode, float dpr,
+bool RasterizeSvg(IWICImagingFactory* wic, std::string_view svg, bool dark_mode, float dpr, float max_width,
                   Microsoft::WRL::ComPtr<IWICBitmap>& out, float& css_width, float& css_height, std::wstring& error)
 {
     // LunaSVG のフォントキャッシュは共有なので、ディスク読み込みと初回描画が重なっても直列化する。
@@ -161,6 +161,11 @@ bool RasterizeSvg(IWICImagingFactory* wic, std::string_view svg, bool dark_mode,
     document->applyStyleSheet(BuildLunaCss(dark_mode));
 
     double scale = std::clamp(dpr, 0.25f, 8.0f);
+    // 横に収まらない図は表示幅に合わせて縮小する。4096px 固定で作ると巨大な図の
+    // ラスタライズが支配的になり、SVG キャッシュから復元する意味が薄れる。
+    if (max_width > 0.5f && css_width > max_width) {
+        scale = std::min(scale, scale * static_cast<double>(max_width) / css_width);
+    }
     constexpr double kMaxSide = 4096.0;
     const double requested_w = css_width * scale;
     const double requested_h = css_height * scale;
@@ -441,7 +446,7 @@ void MermaidRenderer::RenderNative(DiskLoad& job)
 
     Microsoft::WRL::ComPtr<IWICBitmap> wic_bitmap;
     std::wstring raster_error;
-    if (!RasterizeSvg(wic_factory_.Get(), svg, job.req.dark_mode, dpr_, wic_bitmap,
+    if (!RasterizeSvg(wic_factory_.Get(), svg, job.req.dark_mode, dpr_, job.req.max_width, wic_bitmap,
                       job.req.css_width, job.req.css_height, raster_error)) {
         job.captured = true;
         job.error = std::move(raster_error);
@@ -481,7 +486,8 @@ void MermaidRenderer::LoadDiskJob(DiskLoad& job, const std::filesystem::path& pa
     std::string svg(reinterpret_cast<const char*>(data.data()), data.size());
     std::wstring error;
     TaskScheduler::EnsureWorkerCom();
-    if (RasterizeSvg(wic_factory_.Get(), svg, job.req.dark_mode, dpr_, job.bitmap,
+    RegisterFontsOnce();
+    if (RasterizeSvg(wic_factory_.Get(), svg, job.req.dark_mode, dpr_, job.req.max_width, job.bitmap,
                      job.req.css_width, job.req.css_height, error)) {
         job.svg = std::move(svg);
     } else {
