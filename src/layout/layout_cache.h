@@ -4,12 +4,14 @@
 #include "utility.h"
 #include <cstdint>
 #include <limits>
+#include <string>
 #include <vector>
 #include <memory>
 #include <memory_resource>
 #include <wrl/client.h>
 #include <d2d1.h>
 #include <dwrite.h>
+#include <wincodec.h>
 #include <algorithm>
 #include <ranges>
 #include <span>
@@ -475,9 +477,9 @@ struct DiagramEntry {
     Microsoft::WRL::ComPtr<ID2D1Bitmap> bitmap;
     float width = 0.0f;
     float height = 0.0f;
-    // クリップボードコピー・保存用の元 PNG。bitmap と同時に設定/破棄する (EvictBitmap 含む)。
-    // コードを書き換えた図の仮表示では別の図の絵なので捨て、描き直すまでボタンを出さない。
-    PngBytes png;
+    // クリップボードコピー・PNG 保存用の元ビットマップと SVG。
+    Microsoft::WRL::ComPtr<IWICBitmap> wic_bitmap;
+    std::string svg;
     // レンダリング失敗時のエラーメッセージ (表示用整形済み)。非空 = 失敗確定で、
     // プレースホルダにこの文言を表示し再リクエストを止める。リロード・幅変更・
     // テーマ変更・デバイスロストでクリアされ再試行の契機になる。オフスクリーン evict では保持する。
@@ -499,7 +501,8 @@ struct DiagramEntry {
     void EvictBitmap() noexcept
     {
         bitmap.Reset();
-        png.reset();
+        wic_bitmap.Reset();
+        svg.clear();
         stale = false;
     }
 
@@ -518,7 +521,8 @@ struct DiagramEntry {
         bitmap.Reset();
         width = 0.0f;
         height = 0.0f;
-        png.reset();
+        wic_bitmap.Reset();
+        svg.clear();
         error.clear();
         stale = false;
     }

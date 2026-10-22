@@ -21,6 +21,7 @@
 #include <memory_resource>
 #include <mutex>
 #include <queue>
+#include <string>
 #include <unordered_set>
 
 // Merman の C ABI で Mermaid SVG を作り、LunaSVG でラスタライズして
@@ -84,16 +85,18 @@ private:
 
     struct CachedResult {
         Microsoft::WRL::ComPtr<ID2D1Bitmap> bitmap;
+        // 保存/コピー用の元ビットマップ。表示用 D2D ビットマップとは別に保持する。
+        Microsoft::WRL::ComPtr<IWICBitmap> wic_bitmap;
         float width = 0.0f;
         float height = 0.0f;
-        PngBytes png;
+        std::string svg;
         std::pmr::wstring error;
     };
 
     struct DiskLoad {
         RenderRequest req;
         Microsoft::WRL::ComPtr<IWICBitmap> bitmap;
-        PngBytes png;
+        std::string svg;
         bool captured = false;
         bool native = false;
         DWORD read_error = 0;

@@ -96,7 +96,7 @@ void ForEachOverlayButton(const Node& node, const DiagramEntry* diagram, float x
     if (node.type == NodeType::CodeBlock) {
         fn(OverlayButtonRect(x + w, top - NodeBoxPadY(node, theme), OverlayButton::CodeCopy), OverlayButton::CodeCopy);
     }
-    else if (node.type == NodeType::Diagram && diagram && diagram->png) {
+    else if (node.type == NodeType::Diagram && diagram && diagram->wic_bitmap) {
         const auto bmp = MermaidBitmapRect(diagram->width, diagram->height, x, w, top);
         for (const auto kind : { OverlayButton::DiagramSave, OverlayButton::DiagramCopy }) {
             fn(OverlayButtonRect(bmp.right, bmp.top, kind), kind);

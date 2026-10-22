@@ -13,9 +13,6 @@
 #include <utility>
 #include <vector>
 
-// エンコード済み PNG。図のビットマップ・ディスクキャッシュ・クリップボードで共有する。
-using PngBytes = std::shared_ptr<const std::pmr::vector<uint8_t>>;
-
 // UI スレッドで溜まった結果を GPU へ転送する 1 回の持ち時間。1 件で数 ms かかるので、まとめて届くと 1 フレームを押し出す。
 inline constexpr std::chrono::microseconds kUploadSliceBudget{ 4000 };
 

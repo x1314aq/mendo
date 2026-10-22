@@ -30,13 +30,13 @@ public:
     void Init(HWND hwnd, IMermaidRenderer* mermaid_renderer, IWICImagingFactory* wic, ToastCallback show_toast) noexcept;
 
     void CopyCodeBlock(const Document& doc, int node_index, bool dark) const;
-    // png は表示中ビットマップと同寿命の元 PNG (DiagramEntry::png) で、ボタンの表示条件と一致する。
-    void SaveDiagramAsPng(const Document& doc, int node_index, const PngBytes& png) const;
-    void CopyDiagramToClipboard(const Document& doc, int node_index, PngBytes png, float md_width, bool dark);
+    // bitmap は表示中の図の元 WIC ビットマップ。保存時に PNG へエンコードする。
+    void SaveDiagramAsPng(const Document& doc, int node_index, IWICBitmapSource* bitmap) const;
+    void CopyDiagramToClipboard(const Document& doc, int node_index, IWICBitmapSource* bitmap, float md_width, bool dark);
 
 private:
-    // PNG をデコードして CF_DIB 用 GlobalMem を作る。デコードはコピー時のみ実行。失敗/空は空を返す。
-    UniqueGlobalMem BuildDib(const PngBytes& png) const;
+    // WIC ビットマップを CF_DIB 用 GlobalMem に変換する。失敗/空は空を返す。
+    UniqueGlobalMem BuildDib(IWICBitmapSource* bitmap) const;
     // コピー成否に応じたトーストを出す (CopyDiagramToClipboard の各経路共通)。
     void EmitCopyResult(bool ok) const;
 
