@@ -336,6 +336,7 @@ void App::OnPaint()
               state_.view.viewport.GetSelection(), layout.md_rect, sp, tb, gs, ts, sb,
               state_.view.viewport.GetScrollY(), ScrollableContentHeight(),
               state_.view.hover.nav, state_.view.hover.overlay_button,
+              state_.view.hover.diagram,
               state_.view.nav_history.CanGoBack(), state_.view.nav_history.CanGoForward(),
               state_.document.layout_cache.HasDirtyNodes(), h_scroll });
     }

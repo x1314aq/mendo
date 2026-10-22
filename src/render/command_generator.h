@@ -64,7 +64,8 @@ public:
         const TextSelection& selection,
         OverlayButtonHit hovered = {},
         float dpi_scale = 1.0f,
-        const BlockHScrollContext& block_h_scroll = {});
+        const BlockHScrollContext& block_h_scroll = {},
+        int hovered_diagram = -1);
 
 private:
     // ノードの [text_top, text_top + height] の外へはみ出して描く量の全種別での上限
@@ -90,6 +91,7 @@ private:
         D2D1::Matrix3x2F pane_transform;
         const TextSelection& selection;
         OverlayButtonHit hovered;
+        int hovered_diagram = -1;
         BlockHScrollContext h_scroll;
         NodeOverhang overhang;
     };

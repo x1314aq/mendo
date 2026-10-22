@@ -103,6 +103,8 @@ struct HoverHighlights {
     SearchBarHitZone search_bar = SearchBarHitZone::None;
     NavDirection nav = NavDirection::None;
     OverlayButtonHit overlay_button{};
+    // マウスが図の画像領域上にあるノード。-1 なら無し。図の保存/コピーはこれがある間だけ描く。
+    int diagram = -1;
     // 横スクロールバーを出すブロック。-1 なら無し。
     int h_block = -1;
     // PaneTarget 順 (File, Toc)。

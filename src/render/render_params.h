@@ -108,6 +108,7 @@ struct RenderParams {
     float total_content_height = 0.0f;
     NavDirection nav_hovered = NavDirection::None;
     OverlayButtonHit hovered;
+    int hovered_diagram = -1;
     bool can_go_back = false;
     bool can_go_forward = false;
     bool has_dirty_nodes = false;

@@ -176,7 +176,7 @@ Renderer::FrameResult Renderer::Render(const RenderParams& p)
 
     {
         const float dpi_scale = DpiScaleFrom(backend_.GetDpi());
-        const auto& cmds = cmd_generator_.GenerateMdPane(p.nodes, p.cache, p.md_pane_rect, p.scroll_y, p.selection, p.hovered, dpi_scale, p.block_h_scroll);
+        const auto& cmds = cmd_generator_.GenerateMdPane(p.nodes, p.cache, p.md_pane_rect, p.scroll_y, p.selection, p.hovered, dpi_scale, p.block_h_scroll, p.hovered_diagram);
         MENDO_PLOT("draw.command_count", static_cast<int64_t>(cmds.size()));
         ExecuteDrawCommands(cmds, rt(), &brushes_);
     }

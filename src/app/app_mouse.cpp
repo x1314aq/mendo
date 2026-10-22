@@ -663,11 +663,19 @@ HCURSOR App::HoverMdPane(float dip_x, float dip_y, int px, int py, const PaneLay
     case MdPaneHit::Kind::Scrollbar:
         return cursors_.arrow;
     case MdPaneHit::Kind::OverlayButton:
+        hover.diagram = target.overlay_button.node;
+        break;
     case MdPaneHit::Kind::Content:
         break;
     }
 
     const int node_index = hit_test::HitNode(hit_ctx);
+    if (node_index >= 0) {
+        const auto& node = state_.document.doc.GetNodes()[static_cast<size_t>(node_index)];
+        if (node.type == NodeType::Diagram && state_.document.layout_cache.FindDiagram(static_cast<size_t>(node_index))) {
+            hover.diagram = node_index;
+        }
+    }
     // 横スクロールできるブロック (Table / CodeBlock) だけバーを出す。
     if (state_.view.HDragNode() < 0 && ResolveBlockHScrollGeometry(state_, node_index).can_scroll()) {
         hover.h_block = node_index;
