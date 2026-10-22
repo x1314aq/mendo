@@ -393,11 +393,10 @@ TEST_F(HighlightOrderTest, DiagramOverlayButtonsAreGatedByDiagramHover)
     const int idx = FindFirstNodeIndexByType(pl.nodes, NodeType::Diagram);
     ASSERT_GE(idx, 0);
 
-    // ボタンは描けた (bitmap があり) 保存・コピー元の PNG もある図にだけ付く。
+    // ボタンは描けた (bitmap があり) 保存・コピー元のビットマップもある図にだけ付く。
     auto& diagram = pl.cache.EnsureDiagram(static_cast<size_t>(idx));
     diagram.width = 100.0f;
     diagram.height = 80.0f;
-    diagram.png = std::make_shared<const std::pmr::vector<uint8_t>>(std::pmr::vector<uint8_t>{ 0x89 });
 
     Microsoft::WRL::ComPtr<IWICImagingFactory> wic;
     ASSERT_HRESULT_SUCCEEDED(CoCreateInstance(
@@ -405,6 +404,7 @@ TEST_F(HighlightOrderTest, DiagramOverlayButtonsAreGatedByDiagramHover)
     Microsoft::WRL::ComPtr<IWICBitmap> wic_bitmap;
     ASSERT_HRESULT_SUCCEEDED(wic->CreateBitmap(10, 10, GUID_WICPixelFormat32bppPBGRA,
                                                WICBitmapCacheOnLoad, wic_bitmap.GetAddressOf()));
+    diagram.wic_bitmap = wic_bitmap;
     Microsoft::WRL::ComPtr<ID2D1Factory> d2d;
     ASSERT_HRESULT_SUCCEEDED(D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, d2d.GetAddressOf()));
     Microsoft::WRL::ComPtr<ID2D1RenderTarget> rt;

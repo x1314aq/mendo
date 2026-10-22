@@ -56,7 +56,7 @@ bool App::Init(HWND hwnd)
 
     file_cache_.SetCacheDir(config_.GetConfigPath(L"MermaidCache"));
     const float initial_dpr = DpiScaleFrom(static_cast<float>(GetDpiForWindow(hwnd_)));
-    file_cache_.Init(initial_dpr, scheduler_);
+    file_cache_.Init(scheduler_);
     file_cache_.SetStoreCompletedCallback([hwnd = hwnd_] {
         // worker から呼ばれる。索引の更新は UI スレッドの SaveIndex に任せる。
         ::PostMessageW(hwnd, app_msg::MERMAID_INDEX_DIRTY, 0, 0);
@@ -400,7 +400,6 @@ void App::OnMinimize()
 void App::OnDpiChanged(UINT dpi, const RECT* suggested)
 {
     const float dpr = DpiScaleFrom(static_cast<float>(dpi));
-    file_cache_.SetDpr(dpr);
     mermaid_renderer_.SetDpr(dpr);
     // reducer をプラットフォーム非依存に保つため、Win32 の RECT を PixelRect に詰め替える。
     const PixelRect rc{

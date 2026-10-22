@@ -48,7 +48,7 @@ constexpr float kDefaultMdWidth = 800.0f;
 constexpr std::string_view kMermaidMd = "```mermaid\ngraph TD; A-->B\n```\n";
 
 // テストは png 無しでガード経路のみ踏むため、共通の空 PNG ハンドルを使う。
-const PngBytes kNoPng;
+constexpr IWICBitmapSource* kNoBitmap = nullptr;
 
 } // namespace
 
@@ -75,7 +75,7 @@ protected:
 
     void CopyDiagram(int node_index, float md_width = kDefaultMdWidth, bool dark = false)
     {
-        manager_.CopyDiagramToClipboard(doc_, node_index, kNoPng, md_width, dark);
+        manager_.CopyDiagramToClipboard(doc_, node_index, kNoBitmap, md_width, dark);
     }
 
     Document doc_;
@@ -106,8 +106,8 @@ TEST_F(ClipboardManagerTest, CopyCodeBlockNoOpForNonCodeBlock)
 TEST_F(ClipboardManagerTest, SaveDiagramAsPngNoOpForOutOfRangeIndex)
 {
     Load(kMermaidMd);
-    manager_.SaveDiagramAsPng(doc_, -1, kNoPng);
-    manager_.SaveDiagramAsPng(doc_, 9999, kNoPng);
+    manager_.SaveDiagramAsPng(doc_, -1, kNoBitmap);
+    manager_.SaveDiagramAsPng(doc_, 9999, kNoBitmap);
     EXPECT_TRUE(toasts_.empty());
 }
 
@@ -115,7 +115,7 @@ TEST_F(ClipboardManagerTest, SaveDiagramAsPngNoOpForNonDiagramLanguage)
 {
     const int cb_idx = Load("```cpp\nint main(){}\n```\n", NodeType::CodeBlock);
     ASSERT_GE(cb_idx, 0);
-    manager_.SaveDiagramAsPng(doc_, cb_idx, kNoPng);
+    manager_.SaveDiagramAsPng(doc_, cb_idx, kNoBitmap);
     EXPECT_TRUE(toasts_.empty());
 }
 
@@ -123,7 +123,7 @@ TEST_F(ClipboardManagerTest, SaveDiagramAsPngNoOpWithoutPng)
 {
     const int cb_idx = Load(kMermaidMd);
     ASSERT_GE(cb_idx, 0);
-    manager_.SaveDiagramAsPng(doc_, cb_idx, kNoPng);
+    manager_.SaveDiagramAsPng(doc_, cb_idx, kNoBitmap);
     EXPECT_TRUE(toasts_.empty());
 }
 

@@ -137,50 +137,56 @@ std::string BuildLunaCss(bool dark_mode)
     return css;
 }
 
-bool EncodePng(IWICImagingFactory* wic, const lunasvg::Bitmap& bitmap, PngBytes& png)
+bool RasterizeSvg(IWICImagingFactory* wic, std::string_view svg, bool dark_mode, float dpr, float max_width,
+                  Microsoft::WRL::ComPtr<IWICBitmap>& out, float& css_width, float& css_height, std::wstring& error)
 {
-    if (!wic || bitmap.isNull()) {
+    // LunaSVG のフォントキャッシュは共有なので、ディスク読み込みと初回描画が重なっても直列化する。
+    static std::mutex raster_mutex;
+    const std::lock_guard lock(raster_mutex);
+    if (!wic) {
+        error = L"WIC is unavailable";
         return false;
     }
-    Microsoft::WRL::ComPtr<IStream> stream;
-    if (FAILED(CreateStreamOnHGlobal(nullptr, TRUE, &stream))) {
+    auto document = lunasvg::Document::loadFromData(svg.data(), svg.size());
+    if (!document) {
+        error = L"Failed to parse Mermaid SVG";
         return false;
     }
-    Microsoft::WRL::ComPtr<IWICBitmapEncoder> encoder;
-    if (FAILED(wic->CreateEncoder(GUID_ContainerFormatPng, nullptr, &encoder)) ||
-        FAILED(encoder->Initialize(stream.Get(), WICBitmapEncoderNoCache))) {
+    css_width = document->width();
+    css_height = document->height();
+    if (!(css_width > 0.5f) || !(css_height > 0.5f)) {
+        error = L"Mermaid SVG has no size";
         return false;
     }
-    Microsoft::WRL::ComPtr<IWICBitmapFrameEncode> frame;
-    if (FAILED(encoder->CreateNewFrame(&frame, nullptr)) || FAILED(frame->Initialize(nullptr))) {
-        return false;
-    }
-    const UINT width = static_cast<UINT>(bitmap.width());
-    const UINT height = static_cast<UINT>(bitmap.height());
-    const UINT stride = static_cast<UINT>(bitmap.stride());
-    WICPixelFormatGUID format = GUID_WICPixelFormat32bppBGRA;
-    if (FAILED(frame->SetSize(width, height)) || FAILED(frame->SetPixelFormat(&format)) ||
-        FAILED(frame->WritePixels(height, stride, stride * height, bitmap.data())) ||
-        FAILED(frame->Commit()) || FAILED(encoder->Commit())) {
-        return false;
-    }
+    document->applyStyleSheet(BuildLunaCss(dark_mode));
 
-    STATSTG stat{};
-    if (FAILED(stream->Stat(&stat, STATFLAG_NONAME))) {
+    double scale = std::clamp(dpr, 0.25f, 8.0f);
+    // 横に収まらない図は表示幅に合わせて縮小する。4096px 固定で作ると巨大な図の
+    // ラスタライズが支配的になり、SVG キャッシュから復元する意味が薄れる。
+    if (max_width > 0.5f && css_width > max_width) {
+        scale = std::min(scale, scale * static_cast<double>(max_width) / css_width);
+    }
+    constexpr double kMaxSide = 4096.0;
+    const double requested_w = css_width * scale;
+    const double requested_h = css_height * scale;
+    if (std::max(requested_w, requested_h) > kMaxSide) {
+        scale *= kMaxSide / std::max(requested_w, requested_h);
+    }
+    const int pixel_width = std::clamp(static_cast<int>(std::ceil(css_width * scale)), 1, 4096);
+    const int pixel_height = std::clamp(static_cast<int>(std::ceil(css_height * scale)), 1, 4096);
+
+    auto bitmap = document->renderToBitmap(pixel_width, pixel_height, 0x00000000);
+    if (bitmap.isNull()) {
+        error = L"Failed to rasterize Mermaid SVG";
         return false;
     }
-    HGLOBAL memory = nullptr;
-    if (FAILED(GetHGlobalFromStream(stream.Get(), &memory)) || !memory) {
+    const UINT stride = static_cast<UINT>(bitmap.stride());
+    const UINT buffer_size = stride * static_cast<UINT>(bitmap.height());
+    if (FAILED(wic->CreateBitmapFromMemory(static_cast<UINT>(bitmap.width()), static_cast<UINT>(bitmap.height()),
+                                           GUID_WICPixelFormat32bppPBGRA, stride, buffer_size, bitmap.data(), &out))) {
+        error = L"Failed to create Mermaid WIC bitmap";
         return false;
     }
-    auto* data = static_cast<const uint8_t*>(GlobalLock(memory));
-    if (!data) {
-        return false;
-    }
-    const size_t size = static_cast<size_t>(stat.cbSize.QuadPart);
-    auto bytes = std::make_shared<std::pmr::vector<uint8_t>>(data, data + size);
-    GlobalUnlock(memory);
-    png = std::move(bytes);
     return true;
 }
 
@@ -189,6 +195,19 @@ std::pmr::wstring ToWide(std::string_view utf8)
     std::pmr::wstring wide;
     string_convert::Utf8ToWide(utf8, wide);
     return wide;
+}
+
+size_t WicBitmapBytes(IWICBitmap* bitmap)
+{
+    if (!bitmap) {
+        return 0;
+    }
+    UINT width = 0;
+    UINT height = 0;
+    if (FAILED(bitmap->GetSize(&width, &height))) {
+        return 0;
+    }
+    return static_cast<size_t>(width) * height * 4;
 }
 
 } // namespace
@@ -207,10 +226,6 @@ void MermaidRenderer::Init(HWND hwnd, IWICImagingFactory* wic, TaskScheduler& bg
     disk_loaded_msg_ = disk_loaded_msg;
     on_update_ = std::move(on_update);
     dpr_ = EstimateWorkerDpr();
-
-    if (file_cache_) {
-        file_cache_->SetDpr(dpr_);
-    }
 }
 
 float MermaidRenderer::EstimateWorkerDpr() noexcept
@@ -234,7 +249,7 @@ void MermaidRenderer::InsertCache(uint64_t hash, CachedResult result)
 {
     cache_.Insert(hash, std::move(result));
     cache_.TrimToBudget(MAX_CACHE_BYTES, [](const CachedResult& c) static {
-        return (c.png ? c.png->size() : 0) + BitmapBytes(c.bitmap.Get());
+        return c.svg.size() + BitmapBytes(c.bitmap.Get()) + WicBitmapBytes(c.wic_bitmap.Get());
     });
 }
 
@@ -254,9 +269,10 @@ void MermaidRenderer::ApplyResult(DiagramEntry& diagram_entry, const CachedResul
         return;
     }
     diagram_entry.bitmap = result.bitmap;
+    diagram_entry.wic_bitmap = result.wic_bitmap;
+    diagram_entry.svg = result.svg;
     diagram_entry.width = result.width;
     diagram_entry.height = result.height;
-    diagram_entry.png = result.png;
     diagram_entry.stale = false;
 }
 
@@ -298,13 +314,13 @@ bool MermaidRenderer::RequestRender(const Node& node, DiagramEntry& diagram_entr
     };
     if (file_cache_) {
         MermaidFileCache::CacheEntry fentry;
-        std::filesystem::path png_path;
+        std::filesystem::path svg_path;
         if (const auto key = file_cache_->LookupDiagram(diagram_entry.code_hash, max_width, dark_mode, fentry);
-            key && file_cache_->LookupPath(*key, fentry, png_path)) {
+            key && file_cache_->LookupPath(*key, fentry, svg_path)) {
             req.width_free = *key == width_free_hash;
             req.css_width = fentry.css_width;
             req.css_height = fentry.css_height;
-            StartDiskLoad(std::move(req), std::move(png_path));
+            StartDiskLoad(std::move(req), std::move(svg_path));
             return false;
         }
     }
@@ -314,6 +330,14 @@ bool MermaidRenderer::RequestRender(const Node& node, DiagramEntry& diagram_entr
 
 void MermaidRenderer::RequestSvg(std::string_view code, float max_width, bool dark_mode, SvgCallback callback)
 {
+    const uint64_t code_hash = Fnv1a64(code);
+    const uint64_t request_hash = mermaid_util::DiagramRequestHash(code_hash, max_width, dark_mode);
+    const uint64_t width_free_hash = mermaid_util::DiagramWidthFreeHash(code_hash, dark_mode);
+    if (const auto* cached = FindCached(request_hash, width_free_hash, max_width); cached && !cached->svg.empty()) {
+        callback(ToWide(cached->svg), false);
+        return;
+    }
+
     std::string error;
     if (!EnsureMermanInitialized(error)) {
         callback({}, false);
@@ -420,59 +444,17 @@ void MermaidRenderer::RenderNative(DiskLoad& job)
         return;
     }
 
-    auto document = lunasvg::Document::loadFromData(svg.data(), svg.size());
-    if (!document) {
+    Microsoft::WRL::ComPtr<IWICBitmap> wic_bitmap;
+    std::wstring raster_error;
+    if (!RasterizeSvg(wic_factory_.Get(), svg, job.req.dark_mode, dpr_, job.req.max_width, wic_bitmap,
+                      job.req.css_width, job.req.css_height, raster_error)) {
         job.captured = true;
-        job.error = L"Failed to parse Mermaid SVG";
+        job.error = std::move(raster_error);
         return;
     }
-    const float css_width = document->width();
-    const float css_height = document->height();
-    if (!(css_width > 0.5f) || !(css_height > 0.5f)) {
-        job.captured = true;
-        job.error = L"Mermaid SVG has no size";
-        return;
-    }
-    document->applyStyleSheet(BuildLunaCss(job.req.dark_mode));
-
-    double scale = dpr_;
-    const double max_side = static_cast<double>(MAX_RASTER_SIDE);
-    const double requested_w = css_width * scale;
-    const double requested_h = css_height * scale;
-    if (std::max(requested_w, requested_h) > max_side) {
-        scale *= max_side / std::max(requested_w, requested_h);
-    }
-    const int pixel_width = std::clamp(static_cast<int>(std::ceil(css_width * scale)), 1, static_cast<int>(MAX_RASTER_SIDE));
-    const int pixel_height = std::clamp(static_cast<int>(std::ceil(css_height * scale)), 1, static_cast<int>(MAX_RASTER_SIDE));
-
-    auto bitmap = document->renderToBitmap(pixel_width, pixel_height, 0x00000000);
-    if (bitmap.isNull()) {
-        job.captured = true;
-        job.error = L"Failed to rasterize Mermaid SVG";
-        return;
-    }
-    PngBytes png;
-    if (!EncodePng(wic_factory_.Get(), bitmap, png)) {
-        job.captured = true;
-        job.error = L"Failed to encode Mermaid PNG";
-        return;
-    }
-    auto decoded = wic_util::DecodeFromMemory(wic_factory_.Get(), *png, GUID_ContainerFormatPng);
-    if (!decoded) {
-        job.captured = true;
-        job.error = L"Failed to decode Mermaid PNG";
-        return;
-    }
-    job.bitmap = wic_util::DecodeToWicBitmap(wic_factory_.Get(), *decoded, { decoded->pixel_width, decoded->pixel_height });
-    if (!job.bitmap) {
-        job.captured = true;
-        job.error = L"Failed to create Mermaid bitmap";
-        return;
-    }
-    job.req.css_width = css_width;
-    job.req.css_height = css_height;
-    job.req.width_free = mermaid_util::IsWidthFree(css_width, job.req.max_width);
-    job.png = std::move(png);
+    job.req.width_free = mermaid_util::IsWidthFree(job.req.css_width, job.req.max_width);
+    job.bitmap = std::move(wic_bitmap);
+    job.svg = std::move(svg);
     job.captured = true;
 }
 
@@ -501,10 +483,15 @@ void MermaidRenderer::LoadDiskJob(DiskLoad& job, const std::filesystem::path& pa
     if (data.empty()) {
         return;
     }
-    job.png = std::make_shared<const std::pmr::vector<uint8_t>>(std::move(data));
+    std::string svg(reinterpret_cast<const char*>(data.data()), data.size());
+    std::wstring error;
     TaskScheduler::EnsureWorkerCom();
-    if (const auto decoded = wic_util::DecodeFromMemory(wic_factory_.Get(), *job.png, GUID_ContainerFormatPng)) {
-        job.bitmap = wic_util::DecodeToWicBitmap(wic_factory_.Get(), *decoded, { decoded->pixel_width, decoded->pixel_height });
+    RegisterFontsOnce();
+    if (RasterizeSvg(wic_factory_.Get(), svg, job.req.dark_mode, dpr_, job.req.max_width, job.bitmap,
+                     job.req.css_width, job.req.css_height, error)) {
+        job.svg = std::move(svg);
+    } else {
+        job.error = std::move(error);
     }
 }
 
@@ -515,12 +502,16 @@ bool MermaidRenderer::ApplyDiskLoad(DiskLoad& r)
         render_target_->CreateBitmapFromWicBitmap(r.bitmap.Get(), &bitmap);
     }
     if (bitmap) {
-        if (r.captured) {
-            if (file_cache_) {
-                file_cache_->StoreAsync(r.req.CacheKey(), r.req.css_width, r.req.css_height, r.png);
-            }
+        if (r.captured && file_cache_ && !r.svg.empty()) {
+            file_cache_->StoreAsync(r.req.CacheKey(), r.req.css_width, r.req.css_height, r.svg);
         }
-        InsertCache(r.req.CacheKey(), CachedResult{ std::move(bitmap), r.req.css_width, r.req.css_height, r.png });
+        InsertCache(r.req.CacheKey(), CachedResult{
+            .bitmap = std::move(bitmap),
+            .wic_bitmap = r.bitmap,
+            .width = r.req.css_width,
+            .height = r.req.css_height,
+            .svg = std::move(r.svg),
+        });
         ReleaseInflight(r.req);
         if (r.native) {
             native_busy_ = false;
@@ -537,10 +528,9 @@ bool MermaidRenderer::ApplyDiskLoad(DiskLoad& r)
         return true;
     }
 
-    if (file_cache_ && !r.png) {
+    if (file_cache_ && r.svg.empty()) {
         file_cache_->OnReadFailed(r.req.CacheKey(), r.read_error);
     }
-    // ディスクに無かった/壊れていた図はネイティブ描画へ回す。
     ReleaseInflight(r.req);
     EnqueueNativeRender(std::move(r.req));
     return false;

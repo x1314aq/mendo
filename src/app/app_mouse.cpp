@@ -452,14 +452,14 @@ void App::HandleOverlayButtonClick(const OverlayButtonHit& hit)
         return;
     case OverlayButton::DiagramCopy:
     case OverlayButton::DiagramSave: {
-        // ボタンは DiagramEntry::png があるときだけ出す。
+        // ボタンは DiagramEntry::wic_bitmap があるときだけ出す。
         const auto* diagram = state_.document.layout_cache.FindDiagram(hit.node);
-        const PngBytes png = diagram ? diagram->png : nullptr;
+        auto* bitmap = diagram ? diagram->wic_bitmap.Get() : nullptr;
         if (hit.kind == OverlayButton::DiagramCopy) {
-            clipboard_manager_.CopyDiagramToClipboard(state_.document.doc, hit.node, png, MdContentWidth(), dark);
+            clipboard_manager_.CopyDiagramToClipboard(state_.document.doc, hit.node, bitmap, MdContentWidth(), dark);
         }
         else {
-            clipboard_manager_.SaveDiagramAsPng(state_.document.doc, hit.node, png);
+            clipboard_manager_.SaveDiagramAsPng(state_.document.doc, hit.node, bitmap);
         }
         return;
     }

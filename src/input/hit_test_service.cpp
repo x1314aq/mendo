@@ -218,9 +218,9 @@ bool hit_test::DiagramImageHitTest(const MdPaneHitContext& ctx, int node_index) 
     if (node_index < 0 || static_cast<size_t>(node_index) >= ctx.nodes.size() || ctx.nodes[node_index].type != NodeType::Diagram) {
         return false;
     }
-    // ボタンを出す条件 (layout::ForEachOverlayButton) と同じく、描けていて元の PNG がある図だけ。
+    // ボタンを出す条件 (layout::ForEachOverlayButton) と同じく、描けていて保存・コピー元のビットマップがある図だけ。
     const DiagramEntry* diagram = ctx.cache.FindDiagram(static_cast<size_t>(node_index));
-    if (!diagram || !diagram->bitmap || !diagram->png) {
+    if (!diagram || !diagram->bitmap || !diagram->wic_bitmap) {
         return false;
     }
     const auto& node = ctx.nodes[node_index];

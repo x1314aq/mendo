@@ -436,7 +436,8 @@ bool LayoutCache::TakeDiagramAsStale(LayoutCache& src, size_t from, size_t to)
     d.MarkStale();
     // コードのハッシュは新しいノードのテキストで計算し直させる。
     d.code_hash = 0;
-    d.png.reset();
+    d.wic_bitmap.Reset();
+    d.svg.clear();
     entries_[to].height = src.entries_[from].height;
     return true;
 }

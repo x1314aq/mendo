@@ -555,7 +555,7 @@ TEST_F(ResourceManagerTest, CarryOverUnchangedKeepsEditedDiagramAsStale)
     mock_mermaid_.sync_apply_bitmap = true;
     rm_.RequestMermaidRenders();
     ASSERT_TRUE(cache_.FindDiagram(old_index)->bitmap);
-    cache_.EnsureDiagram(old_index).png = std::make_shared<const std::pmr::vector<uint8_t>>(4, uint8_t{ 1 });
+    cache_.EnsureDiagram(old_index).svg = "svg";
     cache_[old_index].height = 321.0f;
 
     auto next = Document::FromMarkdown(std::pmr::string{ "# t\n\n```mermaid\ngraph TD;A-->C\n```\n\ntail\n" }, kTestDocPath);
@@ -568,7 +568,7 @@ TEST_F(ResourceManagerTest, CarryOverUnchangedKeepsEditedDiagramAsStale)
     EXPECT_TRUE(d->bitmap);
     EXPECT_TRUE(d->stale);
     EXPECT_EQ(d->code_hash, 0u) << "新しいコードでハッシュを引き直させる";
-    EXPECT_EQ(d->png, nullptr) << "前のコードの絵をコピー・保存させない";
+    EXPECT_EQ(d->svg, std::string{}) << "前のコードの絵をコピー・保存させない";
     EXPECT_FLOAT_EQ(next_cache[new_index].height, 321.0f);
 }
 
@@ -757,7 +757,7 @@ TEST_F(ResourceManagerTest, EvictOffscreenBitmapsNoOpsWhenViewportHeightIsZero)
     const auto& indices = doc_.GetDiagramNodeIndices();
     ASSERT_GE(indices.size(), 2u);
     for (const size_t i : indices) {
-        cache_.EnsureDiagram(i).png = std::make_shared<const std::pmr::vector<uint8_t>>(4, uint8_t{ 1 });
+        cache_.EnsureDiagram(i).svg = "svg";
     }
     tracker_.viewport_height = 0.0f;
     viewport_.SetScrollY(0.0f);
@@ -765,7 +765,7 @@ TEST_F(ResourceManagerTest, EvictOffscreenBitmapsNoOpsWhenViewportHeightIsZero)
     rm_.EvictOffscreenBitmaps();
 
     for (const size_t i : indices) {
-        EXPECT_NE(cache_.FindDiagram(i)->png, nullptr) << "node " << i;
+        EXPECT_FALSE(cache_.FindDiagram(i)->svg.empty()) << "node " << i;
     }
 }
 
@@ -791,7 +791,7 @@ TEST_F(ResourceManagerTest, EvictOffscreenBitmapsKeepsEvictedNodesMeasured)
     }
 }
 
-TEST_F(ResourceManagerTest, EvictOffscreenBitmapsReleasesDiagramPngButKeepsSize)
+TEST_F(ResourceManagerTest, EvictOffscreenBitmapsReleasesDiagramSvgButKeepsSize)
 {
     LoadMarkdown("```mermaid\ngraph TD;A-->B\n```\n\n```mermaid\ngraph TD;C-->D\n```\n",
                  /*block_height=*/10000.0f);
@@ -799,7 +799,7 @@ TEST_F(ResourceManagerTest, EvictOffscreenBitmapsReleasesDiagramPngButKeepsSize)
     ASSERT_GE(indices.size(), 2u);
     for (const size_t i : indices) {
         auto& d = cache_.EnsureDiagram(i);
-        d.png = std::make_shared<const std::pmr::vector<uint8_t>>(4, uint8_t{ 1 });
+        d.svg = "svg";
         d.width = 320.0f;
         d.height = 240.0f;
     }
@@ -809,8 +809,8 @@ TEST_F(ResourceManagerTest, EvictOffscreenBitmapsReleasesDiagramPngButKeepsSize)
 
     const auto& near_diagram = *cache_.FindDiagram(indices[0]);
     const auto& far_diagram = *cache_.FindDiagram(indices[1]);
-    EXPECT_NE(near_diagram.png, nullptr);
-    EXPECT_EQ(far_diagram.png, nullptr);
+    EXPECT_FALSE(near_diagram.svg.empty());
+    EXPECT_TRUE(far_diagram.svg.empty());
     EXPECT_FLOAT_EQ(far_diagram.width, 320.0f);
     EXPECT_FLOAT_EQ(far_diagram.height, 240.0f);
 }
