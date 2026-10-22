@@ -34,6 +34,7 @@ MermanAbi::~MermanAbi()
 
 bool MermanAbi::Initialize(std::string& error)
 {
+    std::lock_guard lock(mutex_);
     if (ready_) {
         return true;
     }

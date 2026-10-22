@@ -14,10 +14,12 @@
 #include <wrl/client.h>
 #include <chrono>
 #include <algorithm>
+#include <atomic>
 #include <cstdint>
 #include <filesystem>
 #include <memory>
 #include <memory_resource>
+#include <mutex>
 #include <queue>
 #include <unordered_set>
 
@@ -117,6 +119,7 @@ private:
 
     void EnqueueNativeRender(RenderRequest req);
     void StartNextNativeRender();
+    bool EnsureMermanInitialized(std::string& error);
     void RenderNative(DiskLoad& job);
     void StartDiskLoad(RenderRequest req, std::filesystem::path png_path);
     void LoadDiskJob(DiskLoad& job, const std::filesystem::path& path);
@@ -129,7 +132,9 @@ private:
     Microsoft::WRL::ComPtr<IWICImagingFactory> wic_factory_;
     std::move_only_function<void()> on_update_;
     MermanAbi merman_;
-    bool merman_ready_ = false;
+    std::atomic<bool> merman_ready_{ false };
+    std::atomic<bool> merman_init_failed_{ false };
+    std::mutex merman_init_mutex_;
 
     std::queue<RenderRequest, std::pmr::deque<RenderRequest>> pending_requests_;
     std::pmr::unordered_set<uint64_t> inflight_;
