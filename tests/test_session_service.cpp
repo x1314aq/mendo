@@ -56,6 +56,18 @@ TEST_F(SessionServiceTest, LoadPaneStateUsesDefaultWhenWindowFitsIt)
     EXPECT_FLOAT_EQ(loaded.toc_width, PaneController::PANE_DEFAULT_WIDTH);
 }
 
+// 幅はズームを含まない DIP 値として往復する。読み側は倍率を掛けない。
+TEST_F(SessionServiceTest, SavedWidthRoundTripsAsDip)
+{
+    session_.SavePaneState({ .show_file = true, .show_toc = true, .file_width = 300.0f, .toc_width = 260.0f });
+
+    const auto loaded = session_.LoadPaneState(PaneController::PANE_MIN_WIDTH,
+                                               PaneController::PANE_DEFAULT_WIDTH);
+
+    EXPECT_FLOAT_EQ(loaded.file_width, 300.0f);
+    EXPECT_FLOAT_EQ(loaded.toc_width, 260.0f);
+}
+
 // ---- SaveScrollPosition / LoadScrollPosition ----
 
 TEST_F(SessionServiceTest, SaveAndLoadScrollPosition)

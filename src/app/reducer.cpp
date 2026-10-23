@@ -782,10 +782,10 @@ void ReduceZoom(AppState& state, SideEffectList& effects, const ZoomAction& a)
         return;
     }
     const auto anchor = SnapshotVisibleTarget(state);
-    state.pane_layout_cache.Invalidate();
     const float new_zoom = state.view.viewport.GetCurrentZoom();
     const float zoom_ratio = new_zoom / state.theme->zoom;
-    state.view.panes.ApplyZoom(zoom_ratio);
+    // ズームは本文だけを対象にする。サイドペインの幅・スクロール位置は画面あたりの
+    // 項目数を保つため据え置き、その寸法に依存するペイン配置も作り直さない。
     state.document.layout_cache.InvalidateAllLayouts(state.document.doc.GetNodes());
     if (anchor.IsValid()) {
         // offset もズーム比でスケールしないと、ノード内の同じ位置が可視先頭に残らない。

@@ -163,9 +163,8 @@ void App::RestoreTheme()
 
 void App::RestorePaneState()
 {
-    // 保存値はズーム適用後の幅なのでそのまま使う。既定幅は既定のままズームしたときと同じになるよう倍率を掛ける。
-    const float default_width = PaneController::PANE_DEFAULT_WIDTH * state_.view.viewport.GetCurrentZoom();
-    const auto s = session_.LoadPaneState(PaneController::PANE_MIN_WIDTH, default_width);
+    // ズームは本文だけに掛かるので、ペイン幅はそのままの DIP で保存・復元する。
+    const auto s = session_.LoadPaneState(PaneController::PANE_MIN_WIDTH, PaneController::PANE_DEFAULT_WIDTH);
     auto& panes = state_.view.panes;
     panes.SetSidePaneVisible(PaneTarget::File, s.show_file);
     panes.SetSidePaneVisible(PaneTarget::Toc, s.show_toc);

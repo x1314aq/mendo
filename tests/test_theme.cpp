@@ -45,6 +45,29 @@ constexpr LayoutField kLayoutFields[] = {
     { "pane_font_size", &Theme::pane_font_size },
 };
 
+// ApplyZoom がスケールする対象。サイドペインの寸法は本文ズームの対象外なので含めない。
+constexpr LayoutField kScalableFields[] = {
+    { "font_size_body", &Theme::font_size_body },
+    { "font_size_code", &Theme::font_size_code },
+    { "margin_left", &Theme::margin_left },
+    { "margin_right", &Theme::margin_right },
+    { "margin_top", &Theme::margin_top },
+    { "margin_bottom", &Theme::margin_bottom },
+    { "paragraph_spacing", &Theme::paragraph_spacing },
+    { "list_item_spacing", &Theme::list_item_spacing },
+    { "heading_spacing_above", &Theme::heading_spacing_above },
+    { "heading_spacing_below", &Theme::heading_spacing_below },
+    { "heading_spacing_below_h1h2", &Theme::heading_spacing_below_h1h2 },
+    { "code_block_spacing_above", &Theme::code_block_spacing_above },
+    { "code_block_padding", &Theme::code_block_padding },
+    { "indent_width", &Theme::indent_width },
+    { "blockquote_bar_width", &Theme::blockquote_bar_width },
+    { "list_bullet_offset", &Theme::list_bullet_offset },
+    { "list_bullet_radius", &Theme::list_bullet_radius },
+    { "hr_thickness", &Theme::hr_thickness },
+    { "h2_underline_thickness", &Theme::h2_underline_thickness },
+};
+
 bool SameRgb(const D2D1_COLOR_F& a, const D2D1_COLOR_F& b)
 {
     return a.r == b.r && a.g == b.g && a.b == b.b;
@@ -161,12 +184,30 @@ TEST(Theme, ApplyZoomScalesLayoutValues)
         Theme t = base;
         t.ApplyZoom(zoom);
         EXPECT_FLOAT_EQ(t.zoom, zoom);
-        for (const auto& f : kLayoutFields) {
+        for (const auto& f : kScalableFields) {
             EXPECT_NEAR(t.*f.member, base.*f.member * zoom, 0.01f) << f.name;
         }
         for (int i = 0; i < 6; ++i) {
             EXPECT_NEAR(t.font_size_h[i], base.font_size_h[i] * zoom, 0.01f) << "h" << i + 1;
         }
+    }
+}
+
+// ズームは本文だけに掛ける。サイドペインの寸法を一緒に拡大すると、
+// ファイル一覧や目次で同時に見える項目数が変わってしまう。
+TEST(Theme, ApplyZoomKeepsSidePaneMetrics)
+{
+    const Theme& base = GetLightTheme();
+    for (const float zoom : { 0.5f, 0.8f, 1.25f, 2.0f }) {
+        SCOPED_TRACE(zoom);
+        Theme t = base;
+        t.ApplyZoom(zoom);
+        EXPECT_FLOAT_EQ(t.pane_item_height, base.pane_item_height);
+        EXPECT_FLOAT_EQ(t.pane_header_height, base.pane_header_height);
+        EXPECT_FLOAT_EQ(t.pane_font_size, base.pane_font_size);
+        EXPECT_FLOAT_EQ(t.splitter_width, base.splitter_width);
+        // 本文側はスケールしていること (取り違え防止)。
+        EXPECT_NEAR(t.font_size_body, base.font_size_body * zoom, 0.01f);
     }
 }
 

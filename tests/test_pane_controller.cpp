@@ -124,26 +124,6 @@ TEST_F(PaneControllerTest, DragSplitter2RespectsMinMdWidth)
 }
 
 // ═══════════════════════════════════════════════
-// ズーム
-// ═══════════════════════════════════════════════
-
-TEST_F(PaneControllerTest, ApplyZoomScalesWidths)
-{
-    float old_file = panes_.GetSidePaneWidth(PaneTarget::File);
-    float old_toc = panes_.GetSidePaneWidth(PaneTarget::Toc);
-    panes_.ApplyZoom(2.0f);
-    EXPECT_FLOAT_EQ(panes_.GetSidePaneWidth(PaneTarget::File), old_file * 2.0f);
-    EXPECT_FLOAT_EQ(panes_.GetSidePaneWidth(PaneTarget::Toc), old_toc * 2.0f);
-}
-
-TEST_F(PaneControllerTest, ApplyZoomScalesScrollPositions)
-{
-    panes_.ScrollSidePaneBy(PaneTarget::File, 50.0f, 200.0f);
-    panes_.ApplyZoom(1.5f);
-    EXPECT_FLOAT_EQ(panes_.SidePaneScroll(PaneTarget::File).scroll_y, 75.0f);
-}
-
-// ═══════════════════════════════════════════════
 // スプリッタードラッグ — ファイルペイン非表示時
 // ═══════════════════════════════════════════════
 
@@ -199,61 +179,35 @@ TEST_F(PaneControllerTest, ScrollBothPanesIndependently)
 }
 
 // ═══════════════════════════════════════════════
-// ズーム — スケールとスクロールの相互作用
-// ═══════════════════════════════════════════════
-
-TEST_F(PaneControllerTest, ApplyZoomHalf)
-{
-    panes_.ScrollSidePaneBy(PaneTarget::File, 100.0f, 500.0f);
-    panes_.ScrollSidePaneBy(PaneTarget::Toc, 60.0f, 300.0f);
-    float old_file_w = panes_.GetSidePaneWidth(PaneTarget::File);
-    panes_.ApplyZoom(0.5f);
-    EXPECT_FLOAT_EQ(panes_.GetSidePaneWidth(PaneTarget::File), old_file_w * 0.5f);
-    EXPECT_FLOAT_EQ(panes_.SidePaneScroll(PaneTarget::File).scroll_y, 50.0f);
-    EXPECT_FLOAT_EQ(panes_.SidePaneScroll(PaneTarget::Toc).scroll_y, 30.0f);
-}
-
-// ═══════════════════════════════════════════════
 // 極端なズーム — MDペインのコンテンツ幅
 // ═══════════════════════════════════════════════
 
-// 500%ズームで両ペイン表示時、MDペインの実効コンテンツ幅が0以下になりうることを検証。
-// RequestMermaidRendersはこの状態でスキップする必要がある。
+// 拡大してもペイン幅は据え置きなので、本文の左右マージンだけが広がる。
+// 狭いウィンドウで高倍率にすると MD ペインの実効コンテンツ幅が 0 以下になりうるため、
+// RequestMermaidRenders はこの状態をスキップする必要がある。
 TEST_F(PaneControllerTest, ExtremeZoomMdContentWidthCanBeZeroOrNegative)
 {
-    // 5倍ズームを模擬: ペイン幅を5倍にする
-    panes_.ApplyZoom(5.0f);
+    constexpr float zoom = 5.0f;
+    constexpr float base_margin = 40.0f;
 
-    // テーマのマージンも5倍になる（margin_left=40*5=200, margin_right=40*5=200）
-    float zoomed_margin_left = 40.0f * 5.0f;
-    float zoomed_margin_right = 40.0f * 5.0f;
-    float zoomed_splitter = 4.0f * 5.0f;
+    // ズームで広がった本文マージン (ペイン幅はそのまま)
+    const float zoomed_margin = base_margin * zoom;
+    const auto layout = panes_.ComputeLayout(800.0f, 800.0f, 4.0f);
+    const float content_width = layout.md_rect.width - zoomed_margin * 2.0f;
 
-    // 幅1000pxのウィンドウでレイアウト
-    auto layout = panes_.ComputeLayout(1000.0f, 800.0f, zoomed_splitter);
-    float md_width = layout.md_rect.width;
-    float content_width = md_width - zoomed_margin_left - zoomed_margin_right;
-
-    // MDペインのコンテンツ幅は0以下になりうる
     EXPECT_LE(content_width, 0.0f)
-        << "500%%ズーム+小さいウィンドウではcontent_widthは0以下になる";
+        << "500% ズーム + 狭いウィンドウでは content_width は 0 以下になる";
 }
 
-// 元のズームに戻した後、MDペインのコンテンツ幅が正常に復帰することを検証。
-TEST_F(PaneControllerTest, ZoomRestoreMdContentWidthPositive)
+// 同じウィンドウ幅でも等倍なら本文のコンテンツ幅は正のまま。
+TEST_F(PaneControllerTest, NormalZoomMdContentWidthPositive)
 {
-    panes_.ApplyZoom(5.0f);
-    panes_.ApplyZoom(1.0f / 5.0f); // 元に戻す
+    constexpr float base_margin = 40.0f;
 
-    float margin_left = 40.0f;
-    float margin_right = 40.0f;
-    float splitter = 4.0f;
+    const auto layout = panes_.ComputeLayout(800.0f, 800.0f, 4.0f);
+    const float content_width = layout.md_rect.width - base_margin * 2.0f;
 
-    auto layout = panes_.ComputeLayout(1200.0f, 800.0f, splitter);
-    float content_width = layout.md_rect.width - margin_left - margin_right;
-
-    EXPECT_GT(content_width, 0.0f)
-        << "ズーム復帰後のcontent_widthは正であるべき";
+    EXPECT_GT(content_width, 0.0f);
 }
 
 // ═══════════════════════════════════════════════

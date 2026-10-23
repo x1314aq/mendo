@@ -65,6 +65,7 @@ public:
         float toc_width = 220.0f;
     };
     void SavePaneState(const PaneState& state);
+    // 幅はズーム倍率を含まない DIP 値として保存・復元する。
     PaneState LoadPaneState(float min_width, float default_width) const;
 
     struct ScrollPosition {

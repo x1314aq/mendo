@@ -1043,7 +1043,7 @@ flowchart TB
 | 本文 | Yu Gothic UI | 16 |
 | コード | Consolas | 14 |
 
-> **Note**: すべてのフォントサイズはズーム倍率 (`Theme::zoom`) で乗算される。
+> **Note**: 本文側のフォントサイズと余白はズーム倍率 (`Theme::zoom`) で乗算される。窓枠（タイトルバー）とサイドペイン（ファイル一覧・目次）、検索バーは固定サイズで、ズームの対象外である。
 
 ---
 
@@ -1245,7 +1245,7 @@ struct Theme {
     float indent_width, blockquote_bar_width;
     float list_bullet_offset, list_bullet_radius, hr_thickness, h2_underline_thickness;
 
-    // ペインレイアウト
+    // ペインレイアウト（ズームの対象外。一覧の同時表示項目数を保つため固定）
     float pane_item_height;
     float pane_header_height;
     float splitter_width;
@@ -1304,6 +1304,8 @@ public:
 `ZOOM_DEFAULT_INDEX = 7`、`ZOOM_STEP_COUNT = 17`。
 
 ズーム変更では `ReduceZoom` が可視先頭のノードとノード内オフセット（ズーム比でスケール）を scroll target に置いて全ノードのレイアウトを無効化し、`Renderer::ApplyZoomFromBase` が zoom=1.0 の基準テーマから作り直して倍率を掛ける（累積適用による誤差を避ける）。続く `App::RelayoutViewport(RelayoutResources::Diagrams)` の `LayoutService::ViewportLayout` が推定し直した Y で見ていた位置を当て直してから可視範囲を計測する（3.7.1）。
+
+ズームは Markdown 本文だけに掛かる。`Theme::ApplyZoom` は本文のフォントサイズと余白のみを倍し、サイドペインの `pane_item_height` / `pane_header_height` / `splitter_width` / `pane_font_size` は据え置く（一覧で同時に見える項目数を変えないため）。ペイン幅もズーム倍率でスケールせず、`ReduceZoom` は `pane_layout_cache` を無効化しない。保存するペイン幅はズームを含まない DIP 値である。
 
 ---
 
@@ -1914,8 +1916,7 @@ public:
     void DragSplitterTo(PaneTarget edge, float dip_x, float total_width,
                         float splitter_w) noexcept;
 
-    // ズーム / レイアウト
-    void ApplyZoom(float ratio) noexcept;
+    // レイアウト（幅はズーム倍率を含まない DIP 値）
     PaneLayout ComputeLayout(float total_w, float total_h, float splitter_w,
                              float top_offset = 0.0f) const noexcept;
 
@@ -2045,8 +2046,8 @@ struct OverlayButtonHit {
 | `Window` | `Maximized` | `bool` | `false` | 最大化状態（最小化中に閉じたときは最小化前の状態） |
 | `Pane` | `ShowFile` | `bool` | `true` | ファイルペイン表示 |
 | `Pane` | `ShowToc` | `bool` | `true` | TOCペイン表示 |
-| `Pane` | `FileWidth` | `int` | `220` (DIP) | ファイルペイン幅 |
-| `Pane` | `TocWidth` | `int` | `220` (DIP) | TOCペイン幅 |
+| `Pane` | `FileWidth` | `int` | `220` (DIP、ズーム非適用) | ファイルペイン幅 |
+| `Pane` | `TocWidth` | `int` | `220` (DIP、ズーム非適用) | TOCペイン幅 |
 | `Session` | `LastFile` | `wstring` | 空文字列 | 最後に開いたファイルパス |
 | `Session` | `ScrollNode` | `int` | `-1` | スクロール位置（ノードインデックス） |
 | `Session` | `ScrollOffset` | `int` | `0` | スクロール位置（ノード内オフセット） |

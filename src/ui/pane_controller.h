@@ -49,8 +49,6 @@ public:
     // edge のペインの右端にあるスプリッタを dip_x へ動かす。
     void DragSplitterTo(PaneTarget edge, float dip_x, float total_width, float splitter_w) noexcept;
 
-    void ApplyZoom(float ratio) noexcept;
-
     PaneLayout ComputeLayout(float total_w, float total_h, float splitter_w, float top_offset = 0.0f) const noexcept;
 
     static constexpr float PANE_DEFAULT_WIDTH = 220.0f;

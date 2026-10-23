@@ -644,12 +644,15 @@ TEST_F(ReducerTest, ToggleDarkMode_EmitsToggleDarkMode)
     EXPECT_TRUE(state.pane_layout_cache.IsValid());
 }
 
+// ズームは本文だけに掛かる。サイドペインの幅・スプリッタ幅は変わらないので、
+// ペイン配置 (md_rect の位置と幅) も作り直さない。
 TEST_F(ReducerTest, ZoomIn_EmitsApplyZoom)
 {
+    state.pane_layout_cache.Set(1000.0f, PaneLayout{});
     auto effects = Reduce(state, ZoomAction{ ZoomDirection::In });
 
     EXPECT_TRUE(HasEffect<effect::ApplyZoom>(effects));
-    EXPECT_FALSE(state.pane_layout_cache.IsValid());
+    EXPECT_TRUE(state.pane_layout_cache.IsValid());
 }
 
 // まとめて届いたノッチは段数ぶん進めるが、組み直しの要求は 1 回だけ出す。

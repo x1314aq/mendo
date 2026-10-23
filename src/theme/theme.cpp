@@ -5,6 +5,8 @@ namespace {
 // Theme 内の「ズームでスケールする float メンバ」を一元管理する。
 // 新規のスケーラブルフィールドを追加する際はここに追記すれば
 // ApplyZoom へのスケール漏れを防げる。font_size_h は配列なので別ループで扱う。
+// サイドペイン (ファイル一覧・目次) の寸法は含めない。ズームは本文の可読性を上げる
+// ためのもので、一覧まで拡大すると同時に見える項目数が減って操作しにくくなる。
 constexpr float Theme::* kScalableThemeFields[]{
     &Theme::font_size_body,
     &Theme::font_size_code,
@@ -25,10 +27,6 @@ constexpr float Theme::* kScalableThemeFields[]{
     &Theme::list_bullet_radius,
     &Theme::hr_thickness,
     &Theme::h2_underline_thickness,
-    &Theme::pane_item_height,
-    &Theme::pane_header_height,
-    &Theme::splitter_width,
-    &Theme::pane_font_size,
 };
 } // namespace
 
