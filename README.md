@@ -4,7 +4,7 @@ A Markdown viewer that renders directly with Direct2D/DirectWrite. It is fast an
 
 **[Japanese / 日本語](README.jp.md)**
 
-![mendo screenshot](./example/image/mendo_light.png)
+![mendo screenshot: Chinese/English mixed typesetting](./example/image/mendo_light_cjk_en.png)
 
 ## Installation
 
