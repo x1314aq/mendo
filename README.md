@@ -1,151 +1,151 @@
-# mendo - 高速で簡単なMarkdownビュアー
+# mendo - Fast and simple Markdown viewer
 
-Direct2D/DirectWriteで直接描画するMarkdownビュアーです。高速かつ省メモリで動作します。
+A Markdown viewer that renders directly with Direct2D/DirectWrite. It is fast and uses little memory.
 
-**日本語** | [English](docs/README.en.md) | [简体中文](docs/README.zh-CN.md) | [繁體中文](docs/README.zh-TW.md) | [한국어](docs/README.ko.md)
+[日本語](docs/README.ja.md) | **English** | [简体中文](docs/README.zh-CN.md) | [繁體中文](docs/README.zh-TW.md) | [한국어](docs/README.ko.md)
 
-![mendoのようす](./example/image/mendo_light.png)
+![mendo screenshot](example/image/mendo_light.png)
 
-## インストール
+## Installation
 
-[winget](https://learn.microsoft.com/windows/package-manager/winget/) でインストールできます。
+Install via [winget](https://learn.microsoft.com/windows/package-manager/winget/):
 
 ```
 winget install tanaton.mendo
 ```
 
-### おすすめの起動方法
-エクスプローラーのアドレス欄に `mendo` と入力してEnterキーを押します。
+### Recommended way to launch
+Type `mendo` into the File Explorer address bar and press Enter.
 
-## 特徴
+## Features
 
-- **高速起動** — ウインドウ生成とファイル処理を並列化する事で高速起動します。
-- **省メモリ** — Markdownの描画にブラウザを使わず、Direct2D + DirectWrite で直接描画します。
-- **ライブリロード** — 表示中ファイルの変更を検出し、自動で表示を更新します。また、変更位置に自動スクロールします。
-- **Mermaid** — `mermaid` コードブロックを図として表示します。（Merman のプリビルド C ABI で SVG を生成し、LunaSVG でネイティブにラスタライズ）
-- **オフライン動作** — ネットワーク接続無しで動作します。
-- **シンタックスハイライト** — 複数のプログラミング言語や設定ファイル等のコードブロックを色分け表示します。
-- **画像表示** — ローカルにあるPNG, JPEG, BMP等の画像を表示します。
-- **LaTeX** — 現在のネイティブビルドでは未対応です。プリビルドの Merman C ABI に数式レンダラが含まれないため、`$$...$$` / ` ```math ` は図として描画されません。
-- **ナビゲーション履歴** — マウスサイドボタン / マウスジェスチャー / タッチパッドスワイプ等でブラウザスタイルの戻る/進むが動作し、スクロール位置も復元します。
-- **ドラッグ&ドロップ** — Markdownファイルをウィンドウにドロップして開けます。
-- **ファイル内検索** — タイトルバーの検索ボタンや `Ctrl+F` でファイル内を検索できます。
-- **見た目の変更** — 各ペインの表示/非表示切り替え、テーマのライト/ダーク切り替え、0.25x〜5.00xの17段階ズーム等、見た目の変更ができます。
-- **多言語 UI** — Windows の表示言語に合わせて、画面とヘルプを日本語・英語・簡体字中国語・繁体字中国語・韓国語で表示します。タイトルバーの設定ボタンからも切り替えられます。
-- **設定の永続化** — ダークモード・ズームレベル・最後に開いたファイル等を `%LOCALAPPDATA%\mendo\` に保存します。
+- **Fast startup** — Window creation and file processing run in parallel for a quick launch.
+- **Low memory usage** — Markdown is drawn directly with Direct2D + DirectWrite, without a browser engine.
+- **Live reload** — Detects changes to the open file, updates the view automatically, and scrolls to the changed position.
+- **Mermaid** — Renders `mermaid` code blocks as diagrams (prebuilt Merman C ABI + native LunaSVG rasterization).
+- **Offline** — Works without a network connection.
+- **Syntax highlighting** — Colors code blocks in many programming languages, configuration file formats, and more.
+- **Images** — Displays local PNG, JPEG, BMP, and other images.
+- **LaTeX** — Not supported in the current native build. The prebuilt Merman C ABI does not include a math renderer, so `$$...$$` / ` ```math ` are not rendered as diagrams.
+- **Navigation history** — Browser-style back/forward via mouse side buttons, mouse gestures, touchpad swipe, and more, with scroll position restored.
+- **Drag & Drop** — Drop a Markdown file onto the window to open it.
+- **In-file search** — Search within the file from the title bar search button or `Ctrl+F`.
+- **Customizable view** — Show/hide each pane, switch between light and dark themes, zoom in 17 steps from 0.25x to 5.00x, and more.
+- **Multilingual UI** — Shows the UI and help in Japanese, English, Simplified Chinese, Traditional Chinese, or Korean to match the Windows display language. You can also switch it from the settings button in the title bar.
+- **Persistent settings** — Dark mode, zoom level, last opened file, and more are saved to `%LOCALAPPDATA%\mendo\`.
 
-## 対応するMarkdown要素
+## Supported Markdown Elements
 
-| 要素 | 対応状況 |
+| Element | Status |
 |---|---|
-| 見出し (H1-H6) | ✅ |
-| 段落 | ✅ |
-| 太字 / 斜体 / 取り消し線 | ✅ |
-| インラインコード | ✅ |
-| コードブロック (フェンス) | ✅ シンタックスハイライト付き。対応言語: C/C++, C#, Java, Kotlin, Swift, Python, JavaScript, TypeScript, Go, Rust, Zig, Haskell, Clojure, Emacs Lisp, Common Lisp, Scheme/Racket, Lua, Vim script, PHP, Ruby, SQL, HTML, XML, CSS, SCSS, JSON, YAML, TOML, INI, Bash, PowerShell, cmd (バッチ), Dockerfile, Makefile, diff |
-| 画像 (PNG / JPEG / BMP) | ✅ 非同期読み込み |
-| Mermaidダイアグラム | ✅ Merman + LunaSVG によるネイティブレンダリング |
-| LaTeX数式 (`$$...$$` / ` ```math `) | ❌ 現在のネイティブビルドでは未対応（Merman の math 機能がプリビルドに含まれないため） |
-| GitHub Alerts | ✅ Note / Tip / Important / Warning / Caution |
-| 脚注 (`[^1]`) | ✅ 文書末尾に番号順で表示、参照と定義を相互にリンク |
-| リンク (外部 / ページ内アンカー) | ✅ |
-| 順序付きリスト / 箇条書き | ✅ ネスト対応 |
-| タスクリスト | ✅ |
-| 引用 (Blockquote) | ✅ |
-| テーブル | ✅ アライメント対応 |
-| 水平線 | ✅ |
+| Headings (H1-H6) | Supported |
+| Paragraphs | Supported |
+| Bold / Italic / Strikethrough | Supported |
+| Inline code | Supported |
+| Fenced code blocks | Supported (with syntax highlighting). Languages: C/C++, C#, Java, Kotlin, Swift, Python, JavaScript, TypeScript, Go, Rust, Zig, Haskell, Clojure, Emacs Lisp, Common Lisp, Scheme/Racket, Lua, Vim script, PHP, Ruby, SQL, HTML, XML, CSS, SCSS, JSON, YAML, TOML, INI, Bash, PowerShell, cmd (batch), Dockerfile, Makefile, diff |
+| Images (PNG / JPEG / BMP) | Supported (async loading) |
+| Mermaid diagrams | Supported (native Merman + LunaSVG rendering) |
+| LaTeX math (`$$...$$` / ` ```math `) | Not supported in the current native build (the prebuilt Merman artifact omits math). |
+| GitHub Alerts | Supported (Note / Tip / Important / Warning / Caution) |
+| Footnotes (`[^1]`) | Supported (listed at the end of the document, with links between references and definitions) |
+| Links (external / page anchors) | Supported |
+| Ordered / Unordered lists | Supported (nested) |
+| Task lists | Supported |
+| Blockquotes | Supported |
+| Tables | Supported (with alignment) |
+| Horizontal rules | Supported |
 
-## キーボードショートカット
+## Keyboard Shortcuts
 
-| キー | 操作 |
+| Key | Action |
 |---|---|
-| `Ctrl+O` | ファイルを開く |
-| `Ctrl+C` | 選択テキストをコピー |
-| `Ctrl+Shift+C` | 選択テキストを書式付き（HTML）でコピー |
-| `Ctrl+A` | 全選択 |
-| `Ctrl+1` | ファイルエクスプローラーの表示/非表示 |
-| `Ctrl+2` | 目次の表示/非表示 |
-| `Ctrl+F` | 検索バーを開く（検索バー内では閉じる） |
-| `F3` / `Ctrl+G` | 次の一致へ移動（検索バー内では `Enter` も可） |
-| `Shift+F3` / `Ctrl+Shift+G` | 前の一致へ移動（検索バー内では `Shift+Enter` も可） |
-| `Ctrl++` / `Ctrl+-` | ズームイン / ズームアウト |
-| `Ctrl+0` | ズームをリセット (100%) |
-| `Ctrl+マウスホイール` | ポインタの下の領域 (本文・ファイルペイン・目次ペイン) をズームイン / ズームアウト |
-| `Alt+←` | 戻る |
-| `Alt+→` | 進む |
-| `F1` | 操作ガイドを表示 |
-| `F5` | 再読み込み |
-| `↑` `↓` | スクロール |
-| `Page Up` `Page Down` | ページスクロール |
-| `Home` `End` | 先頭/末尾へ移動 |
-| `Esc` | 検索バーを閉じる / 選択解除 |
+| `Ctrl+O` | Open file |
+| `Ctrl+C` | Copy selected text |
+| `Ctrl+Shift+C` | Copy selected text as formatted (HTML) |
+| `Ctrl+A` | Select all |
+| `Ctrl+1` | Toggle file explorer |
+| `Ctrl+2` | Toggle table of contents |
+| `Ctrl+F` | Open search bar (closes it when pressed inside the search bar) |
+| `F3` / `Ctrl+G` | Next match (`Enter` also works inside the search bar) |
+| `Shift+F3` / `Ctrl+Shift+G` | Previous match (`Shift+Enter` also works inside the search bar) |
+| `Ctrl++` / `Ctrl+-` | Zoom in / Zoom out |
+| `Ctrl+0` | Reset zoom (100%) |
+| `Ctrl+Mouse wheel` | Zoom in / Zoom out the area under the pointer (document, file pane, or TOC pane) |
+| `Alt+Left` | Go back |
+| `Alt+Right` | Go forward |
+| `F1` | Show help |
+| `F5` | Reload |
+| `Up` `Down` | Scroll |
+| `Page Up` `Page Down` | Page scroll |
+| `Home` `End` | Jump to top / bottom |
+| `Esc` | Close search bar / Deselect |
 
-## マウス操作
+## Mouse Operations
 
-| 操作 | 動作 |
+| Operation | Action |
 |---|---|
-| ドラッグ | テキスト範囲選択 |
-| ダブルクリック | 単語選択 |
-| 右クリック+左右ドラッグ | マウスジェスチャーで戻る/進む |
-| タッチパッド水平スワイプ | 戻る / 進む |
-| サイドボタン | 戻る / 進む |
-| スプリッタードラッグ | ペイン幅の調整 |
-| リンクをクリック | 外部リンクをブラウザで開く / ページ内アンカーにジャンプ |
-| コードブロックのコピーボタン | コードブロックの内容を書式付きでコピー |
-| 図 (Mermaid / 数式) のボタン | PNG画像として保存 / クリップボードにコピー |
+| Drag | Text selection |
+| Double-click | Word selection |
+| Right-click + horizontal drag | Mouse gesture (back / forward) |
+| Touchpad horizontal swipe | Back / Forward |
+| Side buttons | Back / Forward |
+| Splitter drag | Resize pane width |
+| Click link | Open external link in browser / Jump to anchor |
+| Code block copy button | Copy code block as formatted text |
+| Diagram (Mermaid / math) buttons | Save as PNG image / Copy to clipboard |
 
-## 右クリックメニュー
+## Context Menu
 
-| 項目 | 操作 |
+| Item | Action |
 |---|---|
-| ← → ボタン | 戻る / 進む |
-| エディタで開く | 現在のファイルを既定のエディタで開く |
-| コピー | 選択テキストをコピー（テキスト選択時のみ） |
-| 書式付きコピー | 選択テキストをHTMLリッチテキストでコピー。WordやOutlook等に貼ると書式を保持（テキスト選択時のみ） |
-| ダークモード | ライト/ダークテーマの切り替え |
-| ファイルペイン | ファイルエクスプローラーの表示/非表示 |
-| 目次ペイン | 目次の表示/非表示 |
+| Left / Right buttons | Back / Forward |
+| Open in Editor | Open current file in default editor |
+| Copy | Copy selected text (when text is selected) |
+| Copy as HTML | Copy selected text as HTML rich text. Preserves formatting when pasted into Word, Outlook, etc. (when text is selected) |
+| Dark Mode | Toggle light/dark theme |
+| File Pane | Toggle file explorer |
+| TOC Pane | Toggle table of contents |
 
-## スクリーンショット
+## Screenshots
 
-![mendoでmermaid](./example/image/mendo_light_mermaid.png)
+![mendo with mermaid](example/image/mendo_light_mermaid.png)
 
-![mendoのダークモード](./example/image/mendo_dark_test.png)
+![mendo dark mode](example/image/mendo_dark_test.png)
 
-## ビルド
+## Build
 
-### 必要なもの
+### Requirements
 
-- Windows 10 以降
-- Visual Studio 2026 (MSVC, C++23対応)
-- CMake 4.2+（Visual Studio 2026 ジェネレータ対応版）
+- Windows 10 or later
+- Visual Studio 2026 (MSVC, C++23)
+- CMake 4.2+ (required for the Visual Studio 2026 generator)
 
-### ビルド手順
+### Build Steps
 
 ```
 cmake -B build
 cmake --build build --config Release
 ```
 
-生成される実行ファイル: `build/Release/mendo.exe`
+Output: `build/Release/mendo.exe`
 
-テストなしでビルドする場合:
+Build without tests:
 
 ```
 cmake -B build -DMENDO_BUILD_TESTS=OFF
 cmake --build build --config Release
 ```
 
-### テスト実行
+### Run Tests
 
 ```
 cmake --build build --config Release
 build/tests/Release/mendo_tests.exe
 ```
 
-### ベンチマーク（開発者向け）
+### Benchmarks (developers)
 
-[Google Benchmark](https://github.com/google/benchmark) v1.10.0 でパースやレイアウトの所要時間を測ります。既定（OFF）のビルドには含まれません。
+Measures parsing and layout times with [Google Benchmark](https://github.com/google/benchmark) v1.10.0. Not included in the default (OFF) build.
 
 ```
 cmake -B build_bench -DMENDO_BUILD_BENCHMARKS=ON
@@ -153,48 +153,48 @@ cmake --build build_bench --config Release --target mendo_bench
 build_bench/bench/Release/mendo_bench.exe --benchmark_filter=FromMarkdown
 ```
 
-### Tracyプロファイラ有効ビルド（開発者向け）
+### Build with Tracy Profiler (developers)
 
-[Tracy](https://github.com/wolfpld/tracy) v0.14.1 を組み込み、フレーム時間・ゾーン計測・カウンタ時系列プロットを取得できます。Tracy GUI 接続前は計測コードが no-op になる `TRACY_ON_DEMAND` モードで組み込まれます。
+Embeds [Tracy](https://github.com/wolfpld/tracy) v0.14.1 for frame timing, zone tracing, and counter time-series plots. Tracy is built in `TRACY_ON_DEMAND` mode, so instrumentation is a no-op until a Tracy GUI client connects.
 
 ```
 cmake -B build_tracy -DMENDO_USE_TRACY=ON
 cmake --build build_tracy --config Release
 ```
 
-## 使い方
+## Usage
 
 ```
-mendo.exe [ファイルパス | フォルダパス]
+mendo.exe [filepath | folderpath]
 ```
 
-| 引数 | 表示するファイル | ファイルペインのフォルダ |
+| Argument | Document shown | File pane folder |
 |---|---|---|
-| なし | 前回のファイル | カレントフォルダ |
-| ファイル | 指定したファイル | そのファイルのフォルダ |
-| フォルダ | 前回のファイル | 指定したフォルダ |
+| none | last opened file | current directory |
+| file | the given file | the file's folder |
+| folder | last opened file | the given folder |
 
-カレントフォルダがシステムフォルダや mendo.exe のフォルダのとき（スタートメニューから起動した場合など）は、前回のファイルのフォルダを表示します。ファイルペイン上部のボタンで、表示中のファイルのフォルダへ移動できます。
+When the current directory is a system folder or mendo.exe's folder (e.g. launched from the Start menu), the last file's folder is shown instead. The button at the top of the file pane jumps to the folder of the file being viewed.
 
-前回のファイルがない場合は、`Ctrl+O` またはドラッグ&ドロップでファイルを開けます。
+If there is no last opened file, open a file with `Ctrl+O` or drag & drop.
 
-## 技術スタック
+## Tech Stack
 
-| レイヤー | 技術 |
+| Layer | Technology |
 |---|---|
-| 言語 | C++23 (MSVC) |
+| Language | C++23 (MSVC) |
 | GUI | Win32 API |
-| 2D描画 | Direct2D (`ID2D1DeviceContext`) |
-| テキスト描画 | DirectWrite (`IDWriteTextLayout`) |
-| ダイアグラム | [Merman](https://github.com/Latias94/merman) + [LunaSVG](https://github.com/sammycage/lunasvg) |
-| 数式 | 現在のネイティブビルドでは未対応 |
-| Markdownパーサ | [md4c](https://github.com/mity/md4c) (SAX型コールバック) |
-| テスト | Google Test v1.18.0 |
-| ベンチマーク | Google Benchmark v1.10.0 |
-| ビルド | CMake 4.2+ |
+| 2D rendering | Direct2D (`ID2D1DeviceContext`) |
+| Text rendering | DirectWrite (`IDWriteTextLayout`) |
+| Diagrams | [Merman](https://github.com/Latias94/merman) + [LunaSVG](https://github.com/sammycage/lunasvg) |
+| Math | Not supported in the current native build |
+| Markdown parser | [md4c](https://github.com/mity/md4c) (SAX-style callbacks) |
+| Tests | Google Test v1.18.0 |
+| Benchmarks | Google Benchmark v1.10.0 |
+| Build | CMake 4.2+ |
 
-## ライセンス
+## License
 
 [MIT](LICENSE)
 
-サードパーティライブラリのライセンスについては [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) を参照してください。
+See [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) for third-party library licenses.

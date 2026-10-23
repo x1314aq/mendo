@@ -2,7 +2,7 @@
 
 Direct2D/DirectWrite로 직접 그리는 Markdown 뷰어입니다. 빠르고 메모리를 적게 사용합니다.
 
-[日本語](../README.md) | [English](README.en.md) | [简体中文](README.zh-CN.md) | [繁體中文](README.zh-TW.md) | **한국어**
+[日本語](README.ja.md) | [English](../README.md) | [简体中文](README.zh-CN.md) | [繁體中文](README.zh-TW.md) | **한국어**
 
 ![mendo 스크린샷](../example/image/mendo_light.png)
 

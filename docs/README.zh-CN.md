@@ -2,7 +2,7 @@
 
 使用 Direct2D/DirectWrite 直接绘制的 Markdown 查看器。运行速度快，占用内存少。
 
-[日本語](../README.md) | [English](README.en.md) | **简体中文** | [繁體中文](README.zh-TW.md) | [한국어](README.ko.md)
+[日本語](README.ja.md) | [English](../README.md) | **简体中文** | [繁體中文](README.zh-TW.md) | [한국어](README.ko.md)
 
 ![mendo 截图](../example/image/mendo_light.png)
 
