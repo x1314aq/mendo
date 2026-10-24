@@ -46,6 +46,8 @@ public:
     // コールバック内では PostMessage などスレッドセーフな処理だけを行うこと。
     void SetStoreCompletedCallback(std::function<void()> callback);
     void SaveIndex();
+    // 索引と SVG/PNG をすべて消す。書き込み中のファイルは着地後に worker が消す。
+    void Clear();
     void Shutdown();
     void SetCacheDir(const std::filesystem::path& dir);
     void SetLimits(size_t max_entries, uint64_t max_total_size);

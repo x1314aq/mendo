@@ -252,6 +252,46 @@ void MermaidFileCache::SaveIndex()
     }
 }
 
+void MermaidFileCache::Clear()
+{
+    // 次に書き込みが完了したら再度通知を受けられるようにする。
+    store_notify_pending_.store(false, std::memory_order_release);
+    {
+        const std::lock_guard lock(pending_mutex_);
+        for (auto& [key, evicted] : pending_writes_) {
+            evicted = true;
+        }
+    }
+    // 消した索引を終了時に書き戻さないよう、読み込み直後と同じく dirty を落とす。
+    // PruneOrphanFiles を走らせないため reset ではなく emplace で空の索引にする。
+    index_.emplace();
+    if (cache_dir_.empty()) {
+        return;
+    }
+    // 満杯 (4096 件) を 1 件ずつ消すと UI が 1 秒近く止まる。フォルダごと別名へ移して worker で消す。
+    auto doomed = cache_dir_;
+    doomed += std::format(L".deleting-{}", GetTickCount64());
+    std::error_code ec;
+    std::filesystem::rename(cache_dir_, doomed, ec);
+    if (ec) {
+        // 中のファイルを誰かが開いていると移せない。消せるものだけその場で消す。
+        for (auto it = std::filesystem::directory_iterator(cache_dir_, ec); !ec && it != std::filesystem::directory_iterator(); it.increment(ec)) {
+            const auto ext = it->path().extension();
+            if (ext == L".svg" || ext == L".png" || it->path() == GetIndexPath()) {
+                std::error_code remove_ec;
+                std::filesystem::remove(it->path(), remove_ec);
+            }
+        }
+        return;
+    }
+    const auto remove_all = [doomed = std::move(doomed)] {
+        std::error_code remove_ec;
+        std::filesystem::remove_all(doomed, remove_ec);
+    };
+    if (!scheduler_ || !scheduler_->Post(remove_all)) {
+        remove_all();
+    }
+}
 bool MermaidFileCache::LookupPath(uint64_t key, CacheEntry& entry, std::filesystem::path& svg_path)
 {
     auto& index = Index();

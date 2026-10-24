@@ -22,11 +22,11 @@ winget install tanaton.mendo
 - **快速启动** — 窗口创建与文件处理并行进行，启动迅速。
 - **低内存占用** — 不使用浏览器引擎，通过 Direct2D + DirectWrite 直接绘制 Markdown。
 - **实时重新加载** — 检测到打开的文件发生变化时自动更新显示，并滚动到变化的位置。
-- **Mermaid** — 将 `mermaid` 代码块显示为图表（通过 WebView2 + Mermaid.js 离屏渲染）。
+- **Mermaid** — 将 `mermaid` 代码块显示为图表（用预编译的 Merman C ABI 生成 SVG，再由 LunaSVG 原生光栅化）。
 - **离线运行** — 无需网络连接即可使用。
 - **语法高亮** — 为多种编程语言、配置文件格式等的代码块着色。
 - **图像显示** — 显示本地的 PNG、JPEG、BMP 等图像。
-- **LaTeX** — 使用 KaTeX 渲染 `$$...$$` 块级公式和 ` ```math ` 代码块。（`$$...$$` 仅在段落只由 `$$...$$` 构成时渲染，与其他文本混排的段落按普通文本显示。）
+- **LaTeX** — 当前原生构建不支持。预编译的 Merman C ABI 不含公式渲染器，`$$...$$` / ` ```math ` 按代码显示。
 - **导航历史** — 支持鼠标侧键、鼠标手势、触摸板滑动等浏览器式的后退 / 前进，并恢复滚动位置。
 - **拖放** — 将 Markdown 文件拖放到窗口中即可打开。
 - **文件内搜索** — 通过标题栏的搜索按钮或 `Ctrl+F` 在文件内搜索。
@@ -44,8 +44,8 @@ winget install tanaton.mendo
 | 行内代码 | ✅ |
 | 代码块（围栏） | ✅ 带语法高亮。支持的语言：C/C++, C#, Java, Kotlin, Swift, Python, JavaScript, TypeScript, Go, Rust, Zig, Haskell, Clojure, Emacs Lisp, Common Lisp, Scheme/Racket, Lua, Vim script, PHP, Ruby, SQL, HTML, XML, CSS, SCSS, JSON, YAML, TOML, INI, Bash, PowerShell, cmd（批处理）, Dockerfile, Makefile, diff |
 | 图像 (PNG / JPEG / BMP) | ✅ 异步加载 |
-| Mermaid 图表 | ✅ 使用 WebView2 渲染 |
-| LaTeX 公式 (`$$...$$` / ` ```math `) | ✅ 仅支持块级公式。`$$...$$` 在段落只由 `$$...$$` 构成时渲染，与其他文本混排的段落按文本显示 |
+| Mermaid 图表 | ✅ 使用 Merman + LunaSVG 原生渲染 |
+| LaTeX 公式 (`$$...$$` / ` ```math `) | ❌ 当前原生构建不支持（预编译的 Merman 未包含公式） |
 | GitHub Alerts | ✅ Note / Tip / Important / Warning / Caution |
 | 脚注 (`[^1]`) | ✅ 按编号显示在文档末尾，引用与定义相互链接 |
 | 链接（外部 / 页内锚点） | ✅ |
@@ -186,8 +186,8 @@ mendo.exe [文件路径 | 文件夹路径]
 | GUI | Win32 API |
 | 2D 绘制 | Direct2D (`ID2D1DeviceContext`) |
 | 文本绘制 | DirectWrite (`IDWriteTextLayout`) |
-| 图表 | WebView2 + [Mermaid.js](https://mermaid.js.org/) |
-| 公式 | [KaTeX](https://katex.org/)（通过 Mermaid） |
+| 图表 | [Merman](https://github.com/Latias94/merman) + [LunaSVG](https://github.com/sammycage/lunasvg) |
+| 公式 | 当前原生构建不支持 |
 | Markdown 解析器 | [md4c](https://github.com/mity/md4c)（SAX 式回调） |
 | 测试 | Google Test v1.18.0 |
 | 基准测试 | Google Benchmark v1.10.0 |

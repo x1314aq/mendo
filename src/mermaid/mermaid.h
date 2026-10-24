@@ -90,7 +90,8 @@ private:
         float width = 0.0f;
         float height = 0.0f;
         std::string svg;
-        std::pmr::wstring error;
+        // 失敗の理由。言語で変わる文言は描くときに引く。
+        DiagramError error;
     };
 
     struct DiskLoad {
@@ -108,7 +109,8 @@ private:
     static constexpr unsigned MAX_RASTER_SIDE = 4096;
 
     static void ApplyResult(DiagramEntry& diagram_entry, const CachedResult& result);
-    void SetDiagramError(const RenderRequest& req, std::wstring_view msg);
+    // 表示用リクエストのエラーを kind で確定させる。msg はレンダラが返した文言で、空なら汎用の文言を出す。
+    void SetDiagramError(const RenderRequest& req, DiagramError::Kind kind, std::wstring_view msg = {});
     void ReleaseInflight(const RenderRequest& req) noexcept
     {
         inflight_.erase(req.code_hash);

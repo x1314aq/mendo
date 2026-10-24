@@ -276,14 +276,11 @@ void MermaidRenderer::ApplyResult(DiagramEntry& diagram_entry, const CachedResul
     diagram_entry.stale = false;
 }
 
-void MermaidRenderer::SetDiagramError(const RenderRequest& req, std::wstring_view msg)
+void MermaidRenderer::SetDiagramError(const RenderRequest& req, DiagramError::Kind kind, std::wstring_view msg)
 {
+    // DrawTextCmd の 255 文字上限とプレースホルダ高さ (約3行) に収まる長さ。
     constexpr size_t MAX_ERROR_LEN = 200;
-    auto sanitized = mermaid_util::SanitizeErrorMessage(msg, MAX_ERROR_LEN);
-    if (sanitized.empty()) {
-        sanitized = i18n::S().diagram_error;
-    }
-    InsertCache(req.code_hash, CachedResult{ .error = std::move(sanitized) });
+    InsertCache(req.code_hash, CachedResult{ .error = { kind, mermaid_util::SanitizeErrorMessage(msg, MAX_ERROR_LEN) } });
 }
 
 bool MermaidRenderer::RequestRender(const Node& node, DiagramEntry& diagram_entry, float max_width, bool dark_mode)
@@ -380,7 +377,7 @@ void MermaidRenderer::StartNextNativeRender()
     });
     if (!posted) {
         native_busy_ = false;
-        SetDiagramError(req, L"Native renderer queue is unavailable");
+        SetDiagramError(req, DiagramError::Kind::Render, L"Native renderer queue is unavailable");
         ReleaseInflight(req);
         NotifyUpdate();
     }
@@ -520,7 +517,7 @@ bool MermaidRenderer::ApplyDiskLoad(DiskLoad& r)
     }
 
     if (r.captured) {
-        SetDiagramError(r.req, r.error);
+        SetDiagramError(r.req, DiagramError::Kind::Render, r.error);
         ReleaseInflight(r.req);
         if (r.native) {
             native_busy_ = false;

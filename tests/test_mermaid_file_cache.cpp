@@ -672,3 +672,73 @@ TEST_F(MermaidFileCacheTest, StoreCompletedCallbackRunsAfterSvgWrite)
 
     scheduler_.Init(2);
 }
+
+
+// ═══════════════════════════════════════════════
+// 設定ダイアログからのキャッシュ削除 (Clear)
+// ═══════════════════════════════════════════════
+TEST_F(MermaidFileCacheTest, ClearRemovesEntriesAndFiles)
+{
+    // 移し先 (元フォルダの隣) まで temp_dir_ の中に収める。
+    const auto dir = temp_dir_ / L"cache";
+    cache_.SetCacheDir(dir);
+    InitCache();
+    cache_.StoreAsync(1, 100.0f, 50.0f, MakeDummySvg(100));
+    cache_.StoreAsync(2, 100.0f, 50.0f, MakeDummySvg(200));
+    FlushAndReopen();
+    ASSERT_EQ(cache_.EntryCount(), 2u);
+    // 索引に載っていない旧形式 (PNG) の残骸も一緒に消える。
+    const auto orphan = dir / L"0123456789abcdef.png";
+    ASSERT_TRUE(WriteAllBytes(orphan, "x", 1));
+
+    cache_.Clear();
+
+    EXPECT_EQ(cache_.EntryCount(), 0u);
+    EXPECT_EQ(cache_.TotalSize(), 0u);
+    EXPECT_FALSE(std::filesystem::exists(orphan));
+    EXPECT_FALSE(std::filesystem::exists(dir / L"index.bin"));
+
+    cache_.SaveIndex();
+    scheduler_.Shutdown();
+    scheduler_.Init(2);
+    cache_.Init(scheduler_);
+    EXPECT_EQ(cache_.EntryCount(), 0u);
+    EXPECT_TRUE(std::filesystem::is_empty(temp_dir_)) << "移したフォルダが残っている";
+}
+
+// 書き込み中の SVG は着地後に消え、消した後に孤立ファイルとして現れない。
+TEST_F(MermaidFileCacheTest, ClearDuringPendingWriteLeavesNoSvg)
+{
+    scheduler_.Shutdown();
+    InitCache();
+    scheduler_.Init(1);
+
+    std::promise<void> release;
+    std::shared_future<void> released = release.get_future().share();
+    ASSERT_TRUE(scheduler_.Post([released] { released.wait(); }));
+    cache_.StoreAsync(1, 100.0f, 50.0f, MakeDummySvg(100));
+
+    cache_.Clear();
+    release.set_value();
+    scheduler_.Shutdown();
+
+    EXPECT_FALSE(std::filesystem::exists(SvgPathOf(1)));
+    EXPECT_EQ(cache_.EntryCount(), 0u);
+    scheduler_.Init(2);
+}
+
+// 消した後に保存した図は通常どおり残り、索引も書き戻せる。
+TEST_F(MermaidFileCacheTest, StoreAfterClearPersists)
+{
+    InitCache();
+    cache_.StoreAsync(1, 100.0f, 50.0f, MakeDummySvg(100));
+    cache_.Clear();
+    cache_.StoreAsync(2, 100.0f, 50.0f, MakeDummySvg(100));
+    cache_.SaveIndex();
+
+    auto fresh = OpenFreshCache();
+    MermaidFileCache::CacheEntry entry;
+    FileBlob out;
+    EXPECT_TRUE(LookupAndRead(*fresh, 2, entry, out));
+    EXPECT_FALSE(fresh->LookupDimensions(1, entry));
+}

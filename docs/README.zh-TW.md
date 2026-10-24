@@ -22,11 +22,11 @@ winget install tanaton.mendo
 - **快速啟動** — 視窗建立與檔案處理平行進行，啟動迅速。
 - **低記憶體用量** — 不使用瀏覽器引擎，透過 Direct2D + DirectWrite 直接繪製 Markdown。
 - **即時重新載入** — 偵測到開啟的檔案有變更時自動更新顯示，並捲動到變更的位置。
-- **Mermaid** — 將 `mermaid` 程式碼區塊顯示為圖表（透過 WebView2 + Mermaid.js 進行離屏繪製）。
+- **Mermaid** — 將 `mermaid` 程式碼區塊顯示為圖表（以預先編譯的 Merman C ABI 產生 SVG，再由 LunaSVG 原生光柵化）。
 - **離線運作** — 不需要網路連線即可使用。
 - **語法醒目提示** — 為多種程式語言、設定檔格式等的程式碼區塊上色。
 - **圖片顯示** — 顯示本機的 PNG、JPEG、BMP 等圖片。
-- **LaTeX** — 使用 KaTeX 繪製 `$$...$$` 區塊公式和 ` ```math ` 程式碼區塊。（`$$...$$` 僅在段落只由 `$$...$$` 構成時繪製，與其他文字混排的段落以一般文字顯示。）
+- **LaTeX** — 目前原生建置不支援。預先編譯的 Merman C ABI 不含公式繪製器，`$$...$$` / ` ```math ` 以程式碼顯示。
 - **瀏覽記錄** — 支援滑鼠側鍵、滑鼠手勢、觸控板滑動等瀏覽器式的上一頁 / 下一頁，並還原捲動位置。
 - **拖放** — 將 Markdown 檔案拖放到視窗中即可開啟。
 - **檔案內搜尋** — 透過標題列的搜尋按鈕或 `Ctrl+F` 在檔案內搜尋。
@@ -44,8 +44,8 @@ winget install tanaton.mendo
 | 行內程式碼 | ✅ |
 | 程式碼區塊（圍欄） | ✅ 附語法醒目提示。支援的語言：C/C++, C#, Java, Kotlin, Swift, Python, JavaScript, TypeScript, Go, Rust, Zig, Haskell, Clojure, Emacs Lisp, Common Lisp, Scheme/Racket, Lua, Vim script, PHP, Ruby, SQL, HTML, XML, CSS, SCSS, JSON, YAML, TOML, INI, Bash, PowerShell, cmd（批次檔）, Dockerfile, Makefile, diff |
 | 圖片 (PNG / JPEG / BMP) | ✅ 非同步載入 |
-| Mermaid 圖表 | ✅ 使用 WebView2 繪製 |
-| LaTeX 公式 (`$$...$$` / ` ```math `) | ✅ 僅支援區塊公式。`$$...$$` 在段落只由 `$$...$$` 構成時繪製，與其他文字混排的段落以文字顯示 |
+| Mermaid 圖表 | ✅ 使用 Merman + LunaSVG 原生繪製 |
+| LaTeX 公式 (`$$...$$` / ` ```math `) | ❌ 目前原生建置不支援（預先編譯的 Merman 未包含公式） |
 | GitHub Alerts | ✅ Note / Tip / Important / Warning / Caution |
 | 註腳 (`[^1]`) | ✅ 依編號顯示在文件結尾，參照與定義互相連結 |
 | 連結（外部 / 頁內錨點） | ✅ |
@@ -186,8 +186,8 @@ mendo.exe [檔案路徑 | 資料夾路徑]
 | GUI | Win32 API |
 | 2D 繪製 | Direct2D (`ID2D1DeviceContext`) |
 | 文字繪製 | DirectWrite (`IDWriteTextLayout`) |
-| 圖表 | WebView2 + [Mermaid.js](https://mermaid.js.org/) |
-| 公式 | [KaTeX](https://katex.org/)（透過 Mermaid） |
+| 圖表 | [Merman](https://github.com/Latias94/merman) + [LunaSVG](https://github.com/sammycage/lunasvg) |
+| 公式 | 目前原生建置不支援 |
 | Markdown 剖析器 | [md4c](https://github.com/mity/md4c)（SAX 式回呼） |
 | 測試 | Google Test v1.18.0 |
 | 基準測試 | Google Benchmark v1.10.0 |
