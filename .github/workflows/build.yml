@@ -23,7 +23,9 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: mendo
-          path: build/Release/mendo.exe
+          path: |
+            build/Release/mendo.exe
+            build/Release/merman_ffi.dll
 
   release:
     needs: build
@@ -34,7 +36,7 @@ jobs:
           name: mendo
 
       - name: Create zip archive
-        run: zip mendo.zip mendo.exe
+        run: zip mendo.zip mendo.exe merman_ffi.dll
 
       - name: Generate SHA256 checksum
         run: sha256sum mendo.zip > mendo.zip.sha256
