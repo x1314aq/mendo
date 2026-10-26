@@ -77,67 +77,14 @@ bool EnsureMermanDllLoaded()
     return loaded;
 }
 
-struct DiagramColors {
-    const char* text;
-    const char* node_fill;
-    const char* node_border;
-    const char* edge;
-    const char* cluster_fill;
-    const char* cluster_border;
-    const char* edge_label;
-};
-
-DiagramColors ColorsFor(bool dark_mode) noexcept
+// merman が埋め込む <style> を LunaSVG がそのまま適用するので、色は themeVariables に
+// 任せる。ここでは図の外にあるテキストへフォントを揃えるだけにする。
+std::string BuildLunaCss()
 {
-    if (dark_mode) {
-        return { "#d4d4d4", "#252526", "#d4d4d4", "#d4d4d4", "#2d2d2d", "#555555", "#3c3c3c" };
-    }
-    return { "#24292e", "#ffffff", "#24292e", "#24292e", "#f6f8fa", "#d0d7de", "#eaeef2" };
+    return "text{font-family:\"Microsoft YaHei UI\",\"Segoe UI\",sans-serif;font-size:14px;}";
 }
 
-// LunaSVG は merman が埋め込む <style> を適用しないため、主要な要素だけを
-// 明示的にスタイルする。Mermaid の図種ごとの細かな CSS はここでは扱わない。
-std::string BuildLunaCss(bool dark_mode)
-{
-    const DiagramColors c = ColorsFor(dark_mode);
-    std::string css;
-    css.reserve(1600);
-    css += "text{font-family:\"Microsoft YaHei UI\",\"Segoe UI\",sans-serif;font-size:14px;fill:";
-    css += c.text;
-    css += ";}";
-    css += ".node rect,.node circle,.node ellipse,.node polygon,.node path,.actor,.labelBox,.note,"
-           ".classGroup rect,.stateGroup rect{fill:";
-    css += c.node_fill;
-    css += ";stroke:";
-    css += c.node_border;
-    css += ";stroke-width:2px;}";
-    css += ".cluster rect,.cluster polygon{fill:";
-    css += c.cluster_fill;
-    css += ";stroke:";
-    css += c.cluster_border;
-    css += ";}";
-    css += ".edgePaths .path,.flowchart-link,.messageLine0,.messageLine1,.relation,.transition,"
-           ".state-edge,.edgePath path{stroke:";
-    css += c.edge;
-    css += ";fill:none;stroke-width:2px;}";
-    css += "marker path,.arrowMarkerPath,.arrowheadPath{fill:";
-    css += c.edge;
-    css += ";stroke:";
-    css += c.edge;
-    css += ";}";
-    css += ".edgeLabel rect,.labelBkg{fill:";
-    css += c.edge_label;
-    css += ";opacity:0.9;}";
-    css += ".edgeLabel text,.label text,.nodeLabel,.messageText,.loopText,.labelText{fill:";
-    css += c.text;
-    css += ";}";
-    css += "line,.lifeline,.actor-line{stroke:";
-    css += c.node_border;
-    css += ";}";
-    return css;
-}
-
-bool RasterizeSvg(IWICImagingFactory* wic, std::string_view svg, bool dark_mode, float dpr, float max_width,
+bool RasterizeSvg(IWICImagingFactory* wic, std::string_view svg, float dpr, float max_width,
                   Microsoft::WRL::ComPtr<IWICBitmap>& out, float& css_width, float& css_height, std::wstring& error)
 {
     // LunaSVG のフォントキャッシュは共有なので、ディスク読み込みと初回描画が重なっても直列化する。
@@ -158,7 +105,7 @@ bool RasterizeSvg(IWICImagingFactory* wic, std::string_view svg, bool dark_mode,
         error = L"Mermaid SVG has no size";
         return false;
     }
-    document->applyStyleSheet(BuildLunaCss(dark_mode));
+    document->applyStyleSheet(BuildLunaCss());
 
     double scale = std::clamp(dpr, 0.25f, 8.0f);
     // 横に収まらない図は表示幅に合わせて縮小する。4096px 固定で作ると巨大な図の
@@ -443,7 +390,7 @@ void MermaidRenderer::RenderNative(DiskLoad& job)
 
     Microsoft::WRL::ComPtr<IWICBitmap> wic_bitmap;
     std::wstring raster_error;
-    if (!RasterizeSvg(wic_factory_.Get(), svg, job.req.dark_mode, dpr_, job.req.max_width, wic_bitmap,
+    if (!RasterizeSvg(wic_factory_.Get(), svg, dpr_, job.req.max_width, wic_bitmap,
                       job.req.css_width, job.req.css_height, raster_error)) {
         job.captured = true;
         job.error = std::move(raster_error);
@@ -484,7 +431,7 @@ void MermaidRenderer::LoadDiskJob(DiskLoad& job, const std::filesystem::path& pa
     std::wstring error;
     TaskScheduler::EnsureWorkerCom();
     RegisterFontsOnce();
-    if (RasterizeSvg(wic_factory_.Get(), svg, job.req.dark_mode, dpr_, job.req.max_width, job.bitmap,
+    if (RasterizeSvg(wic_factory_.Get(), svg, dpr_, job.req.max_width, job.bitmap,
                      job.req.css_width, job.req.css_height, error)) {
         job.svg = std::move(svg);
     } else {

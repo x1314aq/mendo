@@ -58,7 +58,7 @@ static std::string BuildRawIndex(uint32_t declared_count, std::initializer_list<
     std::string buf;
     const auto put = [&buf](const auto& v) { buf.append(reinterpret_cast<const char*>(&v), sizeof(v)); };
     put(uint32_t{ 0x4D454D43u }); // "MEMC"
-    put(uint32_t{ 2 });
+    put(uint32_t{ 3 });
     put(1.0f);
     put(declared_count);
     for (const auto& r : records) {

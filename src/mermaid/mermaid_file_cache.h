@@ -71,7 +71,7 @@ public:
 
 private:
     static constexpr uint32_t MAGIC = 0x4D454D43u; // "MEMC"
-    static constexpr uint32_t VERSION = 2;
+    static constexpr uint32_t VERSION = 3;
     static constexpr size_t DEFAULT_MAX_ENTRIES = 4096;
     static constexpr uint64_t DEFAULT_MAX_TOTAL_SIZE = 1ULL * 1024 * 1024 * 1024; // 1GB
 

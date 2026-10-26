@@ -3,8 +3,74 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <string>
 
 namespace {
+
+// 図の見た目は mermaid-js の neutral に合わせる。LunaSVG は merman が埋め込む
+// <style> をそのまま適用するので、色は themeVariables だけで決める。
+// neutral は明るい前提の配色なので、暗所では同じ構成のまま色だけ差し替える。
+std::string ThemeVariables(bool dark_mode)
+{
+    std::string vars =
+        "\"fontFamily\":\"Microsoft YaHei UI, Segoe UI, sans-serif\","
+        "\"fontSize\":\"14px\"";
+    if (!dark_mode) {
+        return vars;
+    }
+    vars +=
+        ",\"background\":\"#1e1e1e\""
+        ",\"mainBkg\":\"#2d2d2d\""
+        ",\"primaryColor\":\"#2d2d2d\""
+        ",\"primaryBorderColor\":\"#555555\""
+        ",\"primaryTextColor\":\"#d4d4d4\""
+        ",\"secondaryColor\":\"#333333\""
+        ",\"tertiaryColor\":\"#333333\""
+        ",\"nodeBorder\":\"#555555\""
+        ",\"nodeTextColor\":\"#d4d4d4\""
+        ",\"textColor\":\"#d4d4d4\""
+        ",\"titleColor\":\"#d4d4d4\""
+        ",\"lineColor\":\"#d4d4d4\""
+        ",\"clusterBkg\":\"#252526\""
+        ",\"clusterBorder\":\"#555555\""
+        ",\"edgeLabelBackground\":\"#252526\""
+        ",\"labelBackgroundColor\":\"#252526\""
+        ",\"labelBoxBkgColor\":\"#2d2d2d\""
+        ",\"labelBoxBorderColor\":\"#555555\""
+        ",\"labelTextColor\":\"#d4d4d4\""
+        ",\"loopTextColor\":\"#d4d4d4\""
+        ",\"actorBkg\":\"#2d2d2d\""
+        ",\"actorBorder\":\"#555555\""
+        ",\"actorTextColor\":\"#d4d4d4\""
+        ",\"actorLineColor\":\"#555555\""
+        ",\"signalColor\":\"#d4d4d4\""
+        ",\"signalTextColor\":\"#d4d4d4\""
+        ",\"noteBkgColor\":\"#3c3c3c\""
+        ",\"noteTextColor\":\"#d4d4d4\""
+        ",\"noteBorderColor\":\"#555555\""
+        ",\"activationBkgColor\":\"#3c3c3c\""
+        ",\"activationBorderColor\":\"#555555\""
+        ",\"sequenceNumberColor\":\"#1e1e1e\""
+        ",\"sectionBkgColor\":\"#252526\""
+        ",\"altSectionBkgColor\":\"#2d2d2d\""
+        ",\"sectionBkgColor2\":\"#252526\""
+        ",\"taskBkgColor\":\"#2d2d2d\""
+        ",\"taskBorderColor\":\"#555555\""
+        ",\"taskTextColor\":\"#d4d4d4\""
+        ",\"taskTextDarkColor\":\"#d4d4d4\""
+        ",\"taskTextOutsideColor\":\"#d4d4d4\""
+        ",\"activeTaskBkgColor\":\"#3c3c3c\""
+        ",\"activeTaskBorderColor\":\"#555555\""
+        ",\"gridColor\":\"#3c3c3c\""
+        ",\"scaleColor\":\"#d4d4d4\""
+        ",\"classText\":\"#d4d4d4\""
+        ",\"fillType0\":\"#2d2d2d\""
+        ",\"fillType1\":\"#333333\""
+        ",\"pieTitleTextColor\":\"#d4d4d4\""
+        ",\"pieSectionTextColor\":\"#d4d4d4\""
+        ",\"pieLegendTextColor\":\"#d4d4d4\"";
+    return vars;
+}
 
 MermanNativeSlice Slice(const void* data, size_t len)
 {
@@ -102,19 +168,20 @@ bool MermanAbi::RenderSvg(std::string_view code, float max_width, bool dark_mode
     }
 
     const float width = std::max(1.0f, std::isfinite(max_width) ? max_width : 1.0f);
-    char options[320];
-    std::snprintf(options, sizeof(options),
-                  "{\"version\":2,\"layout\":{\"container_width\":%.2f},"
-                  "\"site_config\":{\"htmlLabels\":false,\"theme\":\"%s\"},"
-                  "\"svg\":{\"pipeline\":\"resvg-safe\"}}",
-                  width, dark_mode ? "dark" : "default");
+    char layout[96];
+    std::snprintf(layout, sizeof(layout), "\"layout\":{\"container_width\":%.2f},", width);
+    std::string options = "{\"version\":2,";
+    options += layout;
+    options += "\"site_config\":{\"htmlLabels\":false,\"theme\":\"neutral\",\"look\":\"classic\",\"themeVariables\":{";
+    options += ThemeVariables(dark_mode);
+    options += "}},\"svg\":{\"pipeline\":\"resvg-safe\"}}";
 
     MermanNativeOperationRequest request{};
     request.struct_size = MERMAN_NATIVE_STRUCT_SIZE(MermanNativeOperationRequest);
     request.operation = MERMAN_NATIVE_OPERATION_SVG;
     request.source = Slice(code.data(), code.size());
     request.uri = Slice(nullptr, 0);
-    request.options_json = Slice(options, std::strlen(options));
+    request.options_json = Slice(options.data(), options.size());
 
     MermanNativeResult result = MERMAN_NATIVE_RESULT_INIT;
     const MermanNativeStatus status = api_.execute_collect(engine_, &request, &result);
