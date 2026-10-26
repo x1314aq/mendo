@@ -54,6 +54,9 @@ bool App::Init(HWND hwnd)
 
     InitSharedScheduler();
 
+    const auto mermaid_theme = config_.LoadMermaidTheme();
+    mermaid_renderer_.SetTheme(mermaid_theme);
+    file_cache_.SetTheme(mermaid_theme);
     file_cache_.SetCacheDir(config_.GetConfigPath(L"MermaidCache"));
     const float initial_dpr = DpiScaleFrom(static_cast<float>(GetDpiForWindow(hwnd_)));
     file_cache_.Init(scheduler_);
@@ -707,6 +710,7 @@ void App::SaveSession()
     });
 
     session_.SaveLanguage(i18n::ConfigLangKey());
+    config_.SaveMermaidTheme(mermaid_renderer_.ConfiguredTheme());
     // 個別 Save 呼び出しでは write が遅延されるため、終了前に明示 flush で
     // すべての設定値を 1 度のディスク書き込みにまとめる。
     config_.Flush();

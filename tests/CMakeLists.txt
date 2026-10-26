@@ -13,6 +13,9 @@ add_executable(mendo_tests
     test_document_utils.cpp
     test_pane_layout.cpp
     test_mermaid_util.cpp
+    test_mermaid_theme.cpp
+    test_mermaid_svg.cpp
+    ../src/mermaid/merman_abi.cpp
     test_mermaid_file_cache.cpp
     test_ini_parser.cpp
     test_config_service.cpp
@@ -94,7 +97,13 @@ target_link_libraries(mendo_tests PRIVATE
     mendo_test_support
     GTest::gtest_main
     shlwapi
+    merman_ffi lunasvg::lunasvg
 )
+add_custom_command(TARGET mendo_tests POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${MERMAN_ROOT}/bin/x64/merman_ffi.dll"
+        "$<TARGET_FILE_DIR:mendo_tests>/merman_ffi.dll"
+    VERBATIM)
 target_compile_definitions(mendo_tests PRIVATE MENDO_TESTING)
 # test_help が埋め込みヘルプ (res/help_*.md) の実物を読むため。
 target_compile_definitions(mendo_tests PRIVATE "MENDO_RES_DIR=u8\"${CMAKE_SOURCE_DIR}/res\"")

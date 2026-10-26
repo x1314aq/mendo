@@ -11,14 +11,14 @@ namespace mermaid_util {
 std::pmr::wstring BuildLatexFlowchartCode(std::wstring_view latex);
 
 // 言語種別ソルトで同テキストの Mermaid / LatexMath がキー衝突しない。
-uint64_t NodeDiagramHash(const Node& node, float max_width, bool dark_mode) noexcept;
+uint64_t NodeDiagramHash(const Node& node, float max_width, bool dark_mode, std::string_view theme = "default") noexcept;
 // NodeDiagramHash のうちノードのテキストと言語だけで決まる部分。幅とテーマは DiagramRequestHash で混ぜる。
 // テキストのハッシュは図の大きさに比例するので、覚えておけば要求し直すたびに読み直さずに済む。
 uint64_t DiagramCodeHash(const Node& node) noexcept;
-uint64_t DiagramRequestHash(uint64_t code_hash, float max_width, bool dark_mode) noexcept;
+uint64_t DiagramRequestHash(uint64_t code_hash, float max_width, bool dark_mode, std::string_view theme = "default") noexcept;
 // mermaid は既定で useMaxWidth なので、幅の上限より狭く描けた図はどの幅でも同じ結果になる。
 // その結果は幅を混ぜないこのキーでも引けるようにし、幅が変わっても描き直さない。
-uint64_t DiagramWidthFreeHash(uint64_t code_hash, bool dark_mode) noexcept;
+uint64_t DiagramWidthFreeHash(uint64_t code_hash, bool dark_mode, std::string_view theme = "default") noexcept;
 constexpr bool IsWidthFree(float css_width, float max_width) noexcept
 {
     return css_width + 1.0f < max_width;

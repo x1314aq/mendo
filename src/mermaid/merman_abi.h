@@ -22,7 +22,7 @@ public:
     }
 
     // code は UTF-8。戻り値の svg は UTF-8 の SVG 文字列。
-    bool RenderSvg(std::string_view code, float max_width, bool dark_mode, std::string& svg, std::string& error);
+    bool RenderSvg(std::string_view code, float max_width, std::string_view theme, std::string& svg, std::string& error);
 
 private:
     MermanNativeApi api_{};

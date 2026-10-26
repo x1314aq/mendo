@@ -5,6 +5,7 @@
 #include "mermaid_util.h"
 #include "test_helpers.h"
 #include <atomic>
+#include <cstring>
 #include <filesystem>
 #include <future>
 #include <initializer_list>
@@ -58,7 +59,7 @@ static std::string BuildRawIndex(uint32_t declared_count, std::initializer_list<
     std::string buf;
     const auto put = [&buf](const auto& v) { buf.append(reinterpret_cast<const char*>(&v), sizeof(v)); };
     put(uint32_t{ 0x4D454D43u }); // "MEMC"
-    put(uint32_t{ 3 });
+    put(uint32_t{ 4 });
     put(1.0f);
     put(declared_count);
     for (const auto& r : records) {
@@ -426,6 +427,18 @@ TEST_F(MermaidFileCacheTest, LoadIndexIgnoresBrokenFile)
     }
 }
 
+TEST_F(MermaidFileCacheTest, DiscardsDiagramsFromBeforeFontMeasurement)
+{
+    auto bytes = BuildRawIndex(1, { { 1, 100.0f, 50.0f, 256, 1000 } });
+    const uint32_t old_version = 3;
+    std::memcpy(bytes.data() + sizeof(uint32_t), &old_version, sizeof(old_version));
+    WriteTempFile(L"index.bin", bytes);
+    WriteTempFile(L"0000000000000001.svg", MakeDummySvg(256));
+    auto fresh = OpenFreshCache();
+    EXPECT_EQ(fresh->EntryCount(), 0u);
+    EXPECT_FALSE(std::filesystem::exists(SvgPathOf(1)));
+}
+
 TEST_F(MermaidFileCacheTest, LoadIndexSkipsCorruptedEntries)
 {
     WriteTempFile(L"index.bin", BuildRawIndex(4, {
@@ -463,6 +476,34 @@ TEST_F(MermaidFileCacheTest, AsyncWriteCreatesFile)
 
     // TearDownのためにスケジューラを再起動
     scheduler_.Init(2);
+}
+
+TEST_F(MermaidFileCacheTest, ThemeChangeDoesNotReusePersistedDiagram)
+{
+    InitCache();
+    constexpr uint64_t kCode = 123;
+    const auto light_key = mermaid_util::DiagramWidthFreeHash(kCode, false, "neo");
+    const auto dark_key = mermaid_util::DiagramRequestHash(kCode, 600.0f, true, "neo");
+    cache_.StoreAsync(light_key, 400.0f, 100.0f, MakeDummySvg());
+    cache_.StoreAsync(dark_key, 600.0f, 200.0f, MakeDummySvg());
+    FlushAndReopen();
+
+    MermaidFileCache::CacheEntry entry;
+    cache_.SetTheme("neo");
+    EXPECT_EQ(cache_.LookupDiagram(kCode, 600.0f, false, entry), light_key);
+    EXPECT_EQ(entry.css_height, 100.0f);
+    EXPECT_EQ(cache_.LookupDiagram(kCode, 600.0f, true, entry), dark_key);
+    EXPECT_EQ(entry.css_height, 200.0f);
+
+    for (const std::string_view theme : { "default", "neutral", "redux", "redux-color", "invalid" }) {
+        SCOPED_TRACE(theme);
+        cache_.SetTheme(theme);
+        EXPECT_FALSE(cache_.LookupDiagram(kCode, 600.0f, false, entry));
+        EXPECT_FALSE(cache_.LookupDiagram(kCode, 600.0f, true, entry));
+    }
+    cache_.SetTheme("neo");
+    EXPECT_EQ(cache_.LookupDiagram(kCode, 900.0f, false, entry), light_key);
+    EXPECT_EQ(cache_.LookupDiagram(kCode, 600.0f, true, entry), dark_key);
 }
 
 // ═══════════════════════════════════════════════

@@ -380,24 +380,23 @@ TEST(NodeDiagramHash, LatexMathDoesNotCollideWithMermaid)
     EXPECT_NE(mermaid_util::NodeDiagramHash(mermaid, 600.0f, false), mermaid_util::NodeDiagramHash(math, 600.0f, false));
 }
 
-// ディスクキャッシュのファイル名になるので式を変えない。変えると既存のキャッシュを引けなくなる。
-TEST(NodeDiagramHash, KeepsPersistedFormula)
+// 固定 neutral 配色の旧キャッシュを避けつつ、テーマごとのキーを安定させる。
+TEST(NodeDiagramHash, IncludesThemeInPersistedFormula)
 {
     const auto a = ParseSingleCodeBlock("```mermaid\ngraph TD; A-->B\n```");
     // 幅 600 は 608 に量子化される。
-    const uint64_t expected = Fnv1a64(a.GetText()) ^ (uint64_t{ 608 } * kFnv1a64Prime) ^ 2654435761ULL;
+    const uint64_t expected = Fnv1a64(a.GetText()) ^ (uint64_t{ 608 } * kFnv1a64Prime) ^ 2654435761ULL ^ Fnv1a64("dark");
     EXPECT_EQ(mermaid_util::NodeDiagramHash(a, 600.0f, true), expected);
     EXPECT_EQ(mermaid_util::DiagramRequestHash(mermaid_util::DiagramCodeHash(a), 600.0f, true), expected);
-    EXPECT_EQ(mermaid_util::NodeDiagramHash(a, 600.0f, false), Fnv1a64(a.GetText()) ^ (uint64_t{ 608 } * kFnv1a64Prime));
+    EXPECT_EQ(mermaid_util::NodeDiagramHash(a, 600.0f, false), Fnv1a64(a.GetText()) ^ (uint64_t{ 608 } * kFnv1a64Prime) ^ Fnv1a64("default"));
 }
 
-// 幅を混ぜないキーは、どの幅のキーとも重ならず、テーマでは分かれる。ディスクキャッシュのファイル名になるので式を変えない。
-TEST(DiagramWidthFreeHash, DistinctFromWidthKeysAndKeepsFormula)
+TEST(DiagramWidthFreeHash, DistinctFromWidthKeysAndIncludesTheme)
 {
     const auto a = ParseSingleCodeBlock("```mermaid\ngraph TD; A-->B\n```");
     const uint64_t code = mermaid_util::DiagramCodeHash(a);
     const uint64_t free_light = mermaid_util::DiagramWidthFreeHash(code, false);
-    EXPECT_EQ(free_light, Fnv1a64(a.GetText()) ^ kFnv1a64Prime);
+    EXPECT_EQ(free_light, Fnv1a64(a.GetText()) ^ kFnv1a64Prime ^ Fnv1a64("default"));
     EXPECT_NE(mermaid_util::DiagramWidthFreeHash(code, true), free_light);
     for (const float w : { 0.0f, 1.0f, 32.0f, 600.0f, 4000.0f }) {
         EXPECT_NE(mermaid_util::DiagramRequestHash(code, w, false), free_light) << w;
@@ -410,6 +409,44 @@ TEST(DiagramWidthFreeHash, IsWidthFreeNeedsMargin)
     EXPECT_TRUE(mermaid_util::IsWidthFree(400.0f, 600.0f));
     EXPECT_FALSE(mermaid_util::IsWidthFree(599.5f, 600.0f));
     EXPECT_FALSE(mermaid_util::IsWidthFree(600.0f, 600.0f));
+}
+
+TEST(DiagramThemeHash, SeparatesAllConfiguredThemesAndOldNeutralCache)
+{
+    const auto node = ParseSingleCodeBlock("```mermaid\ngraph TD; A-->B\n```");
+    const uint64_t code = mermaid_util::DiagramCodeHash(node);
+    constexpr std::string_view kThemes[] = {
+        "default", "base", "dark", "forest", "neutral", "neo", "neo-dark",
+        "redux", "redux-dark", "redux-color", "redux-dark-color",
+    };
+    for (const auto theme : kThemes) {
+        SCOPED_TRACE(theme);
+        const auto request = mermaid_util::DiagramRequestHash(code, 600.0f, false, theme);
+        const auto width_free = mermaid_util::DiagramWidthFreeHash(code, false, theme);
+        EXPECT_EQ(mermaid_util::NodeDiagramHash(node, 600.0f, false, theme), request);
+        EXPECT_NE(request, code ^ (uint64_t{ 608 } * kFnv1a64Prime));
+        EXPECT_NE(width_free, code ^ kFnv1a64Prime);
+        for (const auto other : kThemes) {
+            if (theme != other) {
+                EXPECT_NE(request, mermaid_util::DiagramRequestHash(code, 600.0f, false, other));
+                EXPECT_NE(width_free, mermaid_util::DiagramWidthFreeHash(code, false, other));
+            }
+            EXPECT_NE(request, mermaid_util::DiagramWidthFreeHash(code, false, other));
+        }
+    }
+}
+
+TEST(DiagramThemeHash, UsesEffectiveDarkThemeAndNormalizesInvalidValues)
+{
+    constexpr uint64_t kCode = 123;
+    for (const std::string_view theme : { "default", "base", "forest", "neutral", "invalid" }) {
+        EXPECT_EQ(mermaid_util::DiagramRequestHash(kCode, 600.0f, true, theme), mermaid_util::DiagramRequestHash(kCode, 600.0f, true, "dark"));
+        EXPECT_EQ(mermaid_util::DiagramWidthFreeHash(kCode, true, theme), mermaid_util::DiagramWidthFreeHash(kCode, true, "dark"));
+    }
+    EXPECT_EQ(mermaid_util::DiagramRequestHash(kCode, 600.0f, false, "invalid"), mermaid_util::DiagramRequestHash(kCode, 600.0f, false, "default"));
+    for (const std::string_view theme : { "neo", "redux", "redux-color" }) {
+        EXPECT_NE(mermaid_util::DiagramRequestHash(kCode, 600.0f, true, theme), mermaid_util::DiagramRequestHash(kCode, 600.0f, true, "dark"));
+    }
 }
 
 TEST(IsModulePath, AcceptsMjsExceptNumericIdSyntax)

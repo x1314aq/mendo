@@ -152,6 +152,7 @@ add_library(mendo_core STATIC
     # mermaid - Mermaid図表サポート
     src/mermaid/mermaid_util.cpp
     src/mermaid/mermaid_file_cache.cpp
+    src/mermaid/mermaid_svg.cpp
     # nav - ナビゲーション
     src/nav/nav.cpp
     # theme - テーマ管理
@@ -173,6 +174,7 @@ target_compile_definitions(mendo_core PUBLIC
 target_link_libraries(mendo_core PUBLIC
     md4c d2d1 dwrite windowscodecs
 )
+target_link_libraries(mendo_core PRIVATE lunasvg::lunasvg)
 if(MENDO_USE_TRACY)
     # MENDO_USE_TRACY: profiler.h のマクロを Tracy 呼び出しに展開するスイッチ。
     # TRACY_ENABLE   : Tracy ヘッダ側の計測コード生成を有効化（Tracy 自体の規約）。

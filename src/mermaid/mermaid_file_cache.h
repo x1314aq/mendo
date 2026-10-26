@@ -1,5 +1,6 @@
 #pragma once
 #include "worker_latch.h"
+#include "mermaid_theme.h"
 #include <atomic>
 #include <cstdint>
 #include <filesystem>
@@ -50,6 +51,10 @@ public:
     void Clear();
     void Shutdown();
     void SetCacheDir(const std::filesystem::path& dir);
+    void SetTheme(std::string_view theme) noexcept
+    {
+        theme_ = mermaid_theme::Normalize(theme);
+    }
     void SetLimits(size_t max_entries, uint64_t max_total_size);
 
     size_t EntryCount()
@@ -71,7 +76,7 @@ public:
 
 private:
     static constexpr uint32_t MAGIC = 0x4D454D43u; // "MEMC"
-    static constexpr uint32_t VERSION = 3;
+    static constexpr uint32_t VERSION = 4;
     static constexpr size_t DEFAULT_MAX_ENTRIES = 4096;
     static constexpr uint64_t DEFAULT_MAX_TOTAL_SIZE = 1ULL * 1024 * 1024 * 1024; // 1GB
 
@@ -120,6 +125,7 @@ private:
     }
 
     std::filesystem::path cache_dir_;
+    std::string_view theme_ = "default";
 
     std::optional<IndexState> index_;
 

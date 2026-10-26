@@ -3,6 +3,7 @@
 #include "file_io.h"
 #include "utf8_codec.h"
 #include "win_handle.h"
+#include "mermaid_theme.h"
 #include <algorithm>
 #include <charconv>
 #include <cmath>
@@ -31,6 +32,8 @@ constexpr auto kKeyFileZoomLevel = "FileZoomLevel"sv;
 constexpr auto kKeyTocZoomLevel = "TocZoomLevel"sv;
 constexpr auto kSectionGeneral = "General"sv;
 constexpr auto kKeyLanguage = "Language"sv;
+constexpr auto kSectionMermaid = "Mermaid"sv;
+constexpr auto kKeyTheme = "Theme"sv;
 } // namespace
 
 void ConfigService::SetConfigDirOverride(const std::filesystem::path& dir)
@@ -205,6 +208,17 @@ std::pmr::wstring ConfigService::LoadWString(std::string_view section, std::stri
 {
     const auto* val = FindValue(section, key);
     return val ? string_convert::Utf8ToWide(*val) : std::pmr::wstring{};
+}
+
+void ConfigService::SaveMermaidTheme(std::string_view theme)
+{
+    StoreValue(kSectionMermaid, kKeyTheme, std::string{ mermaid_theme::Normalize(theme) });
+}
+
+std::string_view ConfigService::LoadMermaidTheme() const
+{
+    const auto* val = FindValue(kSectionMermaid, kKeyTheme);
+    return mermaid_theme::Normalize(val ? std::string_view{ *val } : std::string_view{});
 }
 
 void SessionService::SaveLastFilePath(std::wstring_view path)

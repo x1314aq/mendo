@@ -33,6 +33,9 @@ public:
     void SaveWString(std::string_view section, std::string_view key, std::wstring_view value);
     std::pmr::wstring LoadWString(std::string_view section, std::string_view key) const;
 
+    void SaveMermaidTheme(std::string_view theme);
+    std::string_view LoadMermaidTheme() const;
+
 private:
     [[nodiscard]] const std::string* FindValue(std::string_view section, std::string_view key) const;
     void StoreValue(std::string_view section, std::string_view key, std::string value);

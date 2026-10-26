@@ -178,6 +178,19 @@ mendo.exe [文件路径 | 文件夹路径]
 
 如果没有上次打开的文件，可以按 `Ctrl+O` 或拖放来打开文件。
 
+### Mermaid 主题
+
+关闭 mendo 后，在 `%LOCALAPPDATA%\mendo\settings.ini` 中设置图表主题：
+
+```ini
+[Mermaid]
+Theme=default
+```
+
+支持的值：`default`、`base`、`dark`、`forest`、`neutral`、`neo`、`neo-dark`、`redux`、`redux-dark`、`redux-color`、`redux-dark-color`。配置缺失或非法时回落到 `default`。
+
+深色模式下，`default` / `base` / `forest` / `neutral` 使用 `dark`；`neo` 使用 `neo-dark`；`redux` 使用 `redux-dark`；`redux-color` 使用 `redux-dark-color`。已经是深色的主题保持配置值。切回浅色模式时恢复配置中指定的主题。
+
 ## 技术栈
 
 | 层 | 技术 |

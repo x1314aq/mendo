@@ -1,4 +1,6 @@
 #include "merman_abi.h"
+#include "mermaid_theme.h"
+#include "mermaid_svg.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -7,69 +9,35 @@
 
 namespace {
 
-// 図の見た目は mermaid-js の neutral に合わせる。LunaSVG は merman が埋め込む
-// <style> をそのまま適用するので、色は themeVariables だけで決める。
-// neutral は明るい前提の配色なので、暗所では同じ構成のまま色だけ差し替える。
-std::string ThemeVariables(bool dark_mode)
+std::string_view TextSlice(const MermanNativeSlice& slice)
 {
-    std::string vars =
-        "\"fontFamily\":\"Microsoft YaHei UI, Segoe UI, sans-serif\","
-        "\"fontSize\":\"14px\"";
-    if (!dark_mode) {
-        return vars;
+    return slice.data ? std::string_view{ reinterpret_cast<const char*>(slice.data), slice.len } : std::string_view{};
+}
+
+MermanNativeStatus MeasureText(const MermanNativeTextMeasureRequest* request, MermanNativeTextMeasureResult* result, void*) noexcept
+{
+    *result = {};
+    result->struct_size = MERMAN_NATIVE_STRUCT_SIZE(MermanNativeTextMeasureResult);
+    if (request->text_measurement_protocol_version != MERMAN_TEXT_MEASUREMENT_PROTOCOL_VERSION ||
+        request->operation != MERMAN_TEXT_MEASUREMENT_OPERATION_MERMAID_CALCULATE_TEXT_DIMENSIONS ||
+        request->has_max_width || request->letter_spacing != 0.0 || request->word_spacing != 0.0) {
+        return MERMAN_NATIVE_STATUS_OK;
     }
-    vars +=
-        ",\"background\":\"#1e1e1e\""
-        ",\"mainBkg\":\"#2d2d2d\""
-        ",\"primaryColor\":\"#2d2d2d\""
-        ",\"primaryBorderColor\":\"#555555\""
-        ",\"primaryTextColor\":\"#d4d4d4\""
-        ",\"secondaryColor\":\"#333333\""
-        ",\"tertiaryColor\":\"#333333\""
-        ",\"nodeBorder\":\"#555555\""
-        ",\"nodeTextColor\":\"#d4d4d4\""
-        ",\"textColor\":\"#d4d4d4\""
-        ",\"titleColor\":\"#d4d4d4\""
-        ",\"lineColor\":\"#d4d4d4\""
-        ",\"clusterBkg\":\"#252526\""
-        ",\"clusterBorder\":\"#555555\""
-        ",\"edgeLabelBackground\":\"#252526\""
-        ",\"labelBackgroundColor\":\"#252526\""
-        ",\"labelBoxBkgColor\":\"#2d2d2d\""
-        ",\"labelBoxBorderColor\":\"#555555\""
-        ",\"labelTextColor\":\"#d4d4d4\""
-        ",\"loopTextColor\":\"#d4d4d4\""
-        ",\"actorBkg\":\"#2d2d2d\""
-        ",\"actorBorder\":\"#555555\""
-        ",\"actorTextColor\":\"#d4d4d4\""
-        ",\"actorLineColor\":\"#555555\""
-        ",\"signalColor\":\"#d4d4d4\""
-        ",\"signalTextColor\":\"#d4d4d4\""
-        ",\"noteBkgColor\":\"#3c3c3c\""
-        ",\"noteTextColor\":\"#d4d4d4\""
-        ",\"noteBorderColor\":\"#555555\""
-        ",\"activationBkgColor\":\"#3c3c3c\""
-        ",\"activationBorderColor\":\"#555555\""
-        ",\"sequenceNumberColor\":\"#1e1e1e\""
-        ",\"sectionBkgColor\":\"#252526\""
-        ",\"altSectionBkgColor\":\"#2d2d2d\""
-        ",\"sectionBkgColor2\":\"#252526\""
-        ",\"taskBkgColor\":\"#2d2d2d\""
-        ",\"taskBorderColor\":\"#555555\""
-        ",\"taskTextColor\":\"#d4d4d4\""
-        ",\"taskTextDarkColor\":\"#d4d4d4\""
-        ",\"taskTextOutsideColor\":\"#d4d4d4\""
-        ",\"activeTaskBkgColor\":\"#3c3c3c\""
-        ",\"activeTaskBorderColor\":\"#555555\""
-        ",\"gridColor\":\"#3c3c3c\""
-        ",\"scaleColor\":\"#d4d4d4\""
-        ",\"classText\":\"#d4d4d4\""
-        ",\"fillType0\":\"#2d2d2d\""
-        ",\"fillType1\":\"#333333\""
-        ",\"pieTitleTextColor\":\"#d4d4d4\""
-        ",\"pieSectionTextColor\":\"#d4d4d4\""
-        ",\"pieLegendTextColor\":\"#d4d4d4\"";
-    return vars;
+    try {
+        const auto metrics = MeasureMermaidText(TextSlice(request->text), request->font_size,
+                                                TextSlice(request->font_weight), TextSlice(request->font_style));
+        if (metrics) {
+            result->handled = 1;
+            result->result_kind = MERMAN_TEXT_MEASUREMENT_RESULT_KIND_METRICS;
+            result->width = metrics->width;
+            result->height = std::max(metrics->height, request->line_height * metrics->line_count);
+            result->line_count = metrics->line_count;
+        }
+    }
+    catch (...) {
+        // C ABI の外へ例外を出さず、計測できなければ merman の既定計測に任せる。
+    }
+    return MERMAN_NATIVE_STATUS_OK;
 }
 
 MermanNativeSlice Slice(const void* data, size_t len)
@@ -128,7 +96,7 @@ bool MermanAbi::Initialize(std::string& error)
     MermanNativeEngineConfig config{};
     config.struct_size = MERMAN_NATIVE_STRUCT_SIZE(MermanNativeEngineConfig);
     config.options_json = Slice(nullptr, 0);
-    config.text_measure = nullptr;
+    config.text_measure = MeasureText;
     config.text_measure_user_data = nullptr;
 
     MermanNativeEngineToken engine = 0;
@@ -159,7 +127,7 @@ void MermanAbi::Shutdown()
     api_ = {};
 }
 
-bool MermanAbi::RenderSvg(std::string_view code, float max_width, bool dark_mode, std::string& svg, std::string& error)
+bool MermanAbi::RenderSvg(std::string_view code, float max_width, std::string_view theme, std::string& svg, std::string& error)
 {
     std::lock_guard lock(mutex_);
     if (!ready_ || engine_ == 0) {
@@ -172,8 +140,10 @@ bool MermanAbi::RenderSvg(std::string_view code, float max_width, bool dark_mode
     std::snprintf(layout, sizeof(layout), "\"layout\":{\"container_width\":%.2f},", width);
     std::string options = "{\"version\":2,";
     options += layout;
-    options += "\"site_config\":{\"htmlLabels\":false,\"theme\":\"neutral\",\"look\":\"classic\",\"themeVariables\":{";
-    options += ThemeVariables(dark_mode);
+    options += "\"site_config\":{\"htmlLabels\":false,\"theme\":\"";
+    options += mermaid_theme::Normalize(theme);
+    options += "\",\"look\":\"classic\",\"themeVariables\":{"
+               "\"fontFamily\":\"Microsoft YaHei UI, Segoe UI, sans-serif\",\"fontSize\":\"14px\"";
     options += "}},\"svg\":{\"pipeline\":\"resvg-safe\"}}";
 
     MermanNativeOperationRequest request{};

@@ -1,4 +1,5 @@
 #include "mermaid.h"
+#include "mermaid_svg.h"
 #include "d2d_util.h"
 #include "file_io.h"
 #include "i18n.h"
@@ -18,41 +19,6 @@
 #pragma comment(lib, "shcore.lib")
 
 namespace {
-
-constexpr wchar_t kYaHeiPath[] = L"C:\\Windows\\Fonts\\msyh.ttc";
-constexpr wchar_t kSegoePath[] = L"C:\\Windows\\Fonts\\segoeui.ttf";
-constexpr wchar_t kArialPath[] = L"C:\\Windows\\Fonts\\arial.ttf";
-constexpr wchar_t kConsolasPath[] = L"C:\\Windows\\Fonts\\consola.ttf";
-
-void AddFont(const wchar_t* family, const wchar_t* path)
-{
-    if (GetFileAttributesW(path) == INVALID_FILE_ATTRIBUTES) {
-        return;
-    }
-    char narrow_path[MAX_PATH * 3]{};
-    char narrow_family[128]{};
-    if (!WideCharToMultiByte(CP_UTF8, 0, path, -1, narrow_path, sizeof(narrow_path), nullptr, nullptr)) {
-        return;
-    }
-    if (family && *family) {
-        WideCharToMultiByte(CP_UTF8, 0, family, -1, narrow_family, sizeof(narrow_family), nullptr, nullptr);
-    }
-    lunasvg_add_font_face_from_file(narrow_family, false, false, narrow_path);
-}
-
-void RegisterFontsOnce()
-{
-    static std::once_flag once;
-    std::call_once(once, [] {
-        AddFont(L"Microsoft YaHei UI", kYaHeiPath);
-        AddFont(L"Microsoft YaHei", kYaHeiPath);
-        AddFont(L"Segoe UI", kSegoePath);
-        AddFont(L"Arial", kArialPath);
-        AddFont(L"Consolas", kConsolasPath);
-        // 未知の font-family でも CJK を表示できるよう、空ファミリのフォールバックも入れる。
-        AddFont(L"", kYaHeiPath);
-    });
-}
 
 // merman_ffi.dll は exe と同じフォルダにある。DEPENDENTLOADFLAG で system32 以外の
 // 依存 DLL 検索が制限されているため、exe フォルダを明示して先にロードする。
@@ -77,7 +43,7 @@ bool EnsureMermanDllLoaded()
     return loaded;
 }
 
-// merman が埋め込む <style> を LunaSVG がそのまま適用するので、色は themeVariables に
+// merman が埋め込む <style> を LunaSVG がそのまま適用するので、色は選択したテーマに
 // 任せる。ここでは図の外にあるテキストへフォントを揃えるだけにする。
 std::string BuildLunaCss()
 {
@@ -87,14 +53,13 @@ std::string BuildLunaCss()
 bool RasterizeSvg(IWICImagingFactory* wic, std::string_view svg, float dpr, float max_width,
                   Microsoft::WRL::ComPtr<IWICBitmap>& out, float& css_width, float& css_height, std::wstring& error)
 {
-    // LunaSVG のフォントキャッシュは共有なので、ディスク読み込みと初回描画が重なっても直列化する。
-    static std::mutex raster_mutex;
-    const std::lock_guard lock(raster_mutex);
+    // LunaSVG のフォントキャッシュは共有なので、テキスト計測とも直列化する。
+    const std::lock_guard lock(MermaidSvgMutex());
     if (!wic) {
         error = L"WIC is unavailable";
         return false;
     }
-    auto document = lunasvg::Document::loadFromData(svg.data(), svg.size());
+    auto document = LoadMermaidSvg(svg);
     if (!document) {
         error = L"Failed to parse Mermaid SVG";
         return false;
@@ -238,8 +203,8 @@ bool MermaidRenderer::RequestRender(const Node& node, DiagramEntry& diagram_entr
     if (diagram_entry.code_hash == 0) {
         diagram_entry.code_hash = mermaid_util::DiagramCodeHash(node);
     }
-    const uint64_t hash = mermaid_util::DiagramRequestHash(diagram_entry.code_hash, max_width, dark_mode);
-    const uint64_t width_free_hash = mermaid_util::DiagramWidthFreeHash(diagram_entry.code_hash, dark_mode);
+    const uint64_t hash = mermaid_util::DiagramRequestHash(diagram_entry.code_hash, max_width, dark_mode, theme_);
+    const uint64_t width_free_hash = mermaid_util::DiagramWidthFreeHash(diagram_entry.code_hash, dark_mode, theme_);
     if (const auto* cached = FindCached(hash, width_free_hash, max_width)) {
         ApplyResult(diagram_entry, *cached);
         return true;
@@ -252,7 +217,7 @@ bool MermaidRenderer::RequestRender(const Node& node, DiagramEntry& diagram_entr
         .code = std::pmr::string{ node.GetText() },
         .latex = node.code_language() == SyntaxLanguage::LatexMath,
         .max_width = max_width,
-        .dark_mode = dark_mode,
+        .theme = mermaid_theme::Resolve(theme_, dark_mode),
         .code_hash = hash,
         .width_free_hash = width_free_hash,
     };
@@ -275,8 +240,8 @@ bool MermaidRenderer::RequestRender(const Node& node, DiagramEntry& diagram_entr
 void MermaidRenderer::RequestSvg(std::string_view code, float max_width, bool dark_mode, SvgCallback callback)
 {
     const uint64_t code_hash = Fnv1a64(code);
-    const uint64_t request_hash = mermaid_util::DiagramRequestHash(code_hash, max_width, dark_mode);
-    const uint64_t width_free_hash = mermaid_util::DiagramWidthFreeHash(code_hash, dark_mode);
+    const uint64_t request_hash = mermaid_util::DiagramRequestHash(code_hash, max_width, dark_mode, theme_);
+    const uint64_t width_free_hash = mermaid_util::DiagramWidthFreeHash(code_hash, dark_mode, theme_);
     if (const auto* cached = FindCached(request_hash, width_free_hash, max_width); cached && !cached->svg.empty()) {
         callback(ToWide(cached->svg), false);
         return;
@@ -288,7 +253,7 @@ void MermaidRenderer::RequestSvg(std::string_view code, float max_width, bool da
         return;
     }
     std::string svg;
-    if (merman_.RenderSvg(code, max_width, dark_mode, svg, error)) {
+    if (merman_.RenderSvg(code, max_width, mermaid_theme::Resolve(theme_, dark_mode), svg, error)) {
         callback(ToWide(svg), false);
     } else {
         callback({}, false);
@@ -359,7 +324,6 @@ bool MermaidRenderer::EnsureMermanInitialized(std::string& error)
 void MermaidRenderer::RenderNative(DiskLoad& job)
 {
     TaskScheduler::EnsureWorkerCom();
-    RegisterFontsOnce();
 
     std::string init_error;
     if (!EnsureMermanInitialized(init_error)) {
@@ -377,7 +341,7 @@ void MermaidRenderer::RenderNative(DiskLoad& job)
 
     std::string svg;
     std::string error;
-    if (!merman_.RenderSvg(code, job.req.max_width, job.req.dark_mode, svg, error)) {
+    if (!merman_.RenderSvg(code, job.req.max_width, job.req.theme, svg, error)) {
         job.captured = true;
         job.error = ToWide(error);
         return;
@@ -430,7 +394,6 @@ void MermaidRenderer::LoadDiskJob(DiskLoad& job, const std::filesystem::path& pa
     std::string svg(reinterpret_cast<const char*>(data.data()), data.size());
     std::wstring error;
     TaskScheduler::EnsureWorkerCom();
-    RegisterFontsOnce();
     if (RasterizeSvg(wic_factory_.Get(), svg, dpr_, job.req.max_width, job.bitmap,
                      job.req.css_width, job.req.css_height, error)) {
         job.svg = std::move(svg);

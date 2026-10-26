@@ -5,6 +5,7 @@
 #include "merman_abi.h"
 #include "mermaid_file_cache.h"
 #include "mermaid_renderer_interface.h"
+#include "mermaid_theme.h"
 #include "mermaid_util.h"
 #include "task_scheduler.h"
 #include "utility.h"
@@ -42,6 +43,14 @@ public:
     bool RequestRender(const Node& node, DiagramEntry& diagram_entry, float max_width, bool dark_mode) override;
     void RequestSvg(std::string_view code, float max_width, bool dark_mode, SvgCallback callback) override;
     void SetRenderTarget(ID2D1RenderTarget* render_target);
+    void SetTheme(std::string_view theme) noexcept
+    {
+        theme_ = mermaid_theme::Normalize(theme);
+    }
+    std::string_view ConfiguredTheme() const noexcept
+    {
+        return theme_;
+    }
     void SetFileCache(MermaidFileCache* cache) noexcept
     {
         file_cache_ = cache;
@@ -71,7 +80,7 @@ private:
         std::pmr::string code;
         bool latex = false;
         float max_width = 0.0f;
-        bool dark_mode = false;
+        std::string_view theme = "default";
         uint64_t code_hash = 0;
         uint64_t width_free_hash = 0;
         bool width_free = false;
@@ -146,6 +155,7 @@ private:
     bool native_busy_ = false;
     bool shutting_down_ = false;
     float dpr_ = 1.0f;
+    std::string_view theme_ = "default";
 
     LruCache<uint64_t, CachedResult, MAX_CACHE_ENTRIES> cache_;
     MermaidFileCache* file_cache_ = nullptr;

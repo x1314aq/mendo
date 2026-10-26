@@ -335,10 +335,10 @@ void MermaidFileCache::OnReadFailed(uint64_t key, DWORD read_error)
 
 std::optional<uint64_t> MermaidFileCache::LookupDiagram(uint64_t code_hash, float max_width, bool dark_mode, CacheEntry& entry)
 {
-    if (const uint64_t key = mermaid_util::DiagramWidthFreeHash(code_hash, dark_mode); LookupDimensions(key, entry) && mermaid_util::IsWidthFree(entry.css_width, max_width)) {
+    if (const uint64_t key = mermaid_util::DiagramWidthFreeHash(code_hash, dark_mode, theme_); LookupDimensions(key, entry) && mermaid_util::IsWidthFree(entry.css_width, max_width)) {
         return key;
     }
-    if (const uint64_t key = mermaid_util::DiagramRequestHash(code_hash, max_width, dark_mode); LookupDimensions(key, entry)) {
+    if (const uint64_t key = mermaid_util::DiagramRequestHash(code_hash, max_width, dark_mode, theme_); LookupDimensions(key, entry)) {
         return key;
     }
     return std::nullopt;

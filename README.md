@@ -178,6 +178,19 @@ When the current directory is a system folder or mendo.exe's folder (e.g. launch
 
 If there is no last opened file, open a file with `Ctrl+O` or drag & drop.
 
+### Mermaid Theme
+
+Set the diagram theme in `%LOCALAPPDATA%\mendo\settings.ini` while mendo is closed:
+
+```ini
+[Mermaid]
+Theme=default
+```
+
+Supported values: `default`, `base`, `dark`, `forest`, `neutral`, `neo`, `neo-dark`, `redux`, `redux-dark`, `redux-color`, `redux-dark-color`. Missing or invalid values fall back to `default`.
+
+In dark mode, `default` / `base` / `forest` / `neutral` use `dark`; `neo` uses `neo-dark`; `redux` uses `redux-dark`; `redux-color` uses `redux-dark-color`. Themes that are already dark stay as configured. Switching back to light mode restores the configured theme.
+
 ## Tech Stack
 
 | Layer | Technology |
