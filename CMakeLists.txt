@@ -90,24 +90,66 @@ FetchContent_Declare(
     SOURCE_SUBDIR _none
 )
 FetchContent_MakeAvailable(quickjs)
-add_library(quickjs STATIC
-    ${quickjs_SOURCE_DIR}/quickjs.c
-    ${quickjs_SOURCE_DIR}/libregexp.c
-    ${quickjs_SOURCE_DIR}/libunicode.c
-    ${quickjs_SOURCE_DIR}/dtoa.c
-)
-target_include_directories(quickjs SYSTEM PUBLIC ${quickjs_SOURCE_DIR})
-# 同梱の CMakeLists と同じ定義と C11 (Windows の原子操作は /experimental:c11atomics)。
-target_compile_definitions(quickjs PRIVATE _GNU_SOURCE WIN32_LEAN_AND_MEAN _WIN32_WINNT=0x0601)
-set_target_properties(quickjs PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS ON)
-target_compile_options(quickjs PRIVATE /W0 /experimental:c11atomics)
-# quickjs は LTCG の下で組むと解釈実行が遅いため /GL (LTCG) から外す。外すのは先頭の add_compile_options の条件で行う
-# (ここで /GL- を足すと警告 D9025 が出る)。clang-cl はさらに速いが、手元と CI で版が揃わないので MSVC で組む (ユーザーの判断)。
-# Debug でも quickjs は最適化して組む。/Od では JS の呼び出しごとの C スタックが大きく、同じ kJsStackBytes で描ける数式の入れ子が
-# Release よりずっと浅くなる (/RTC1 を外すだけでは足りない)。assert は残る。
-target_compile_options(quickjs PRIVATE $<$<CONFIG:Debug>:/O2> $<$<CONFIG:Debug>:/Ob2>)
-# /RTC は /O2 と一緒に使えない。
-set_target_properties(quickjs PROPERTIES MSVC_RUNTIME_CHECKS "")
+set(MENDO_QUICKJS_SOURCES quickjs.c libregexp.c libunicode.c dtoa.c)
+# 同梱の CMakeLists と同じ定義。
+set(MENDO_QUICKJS_DEFINITIONS _GNU_SOURCE WIN32_LEAN_AND_MEAN _WIN32_WINNT=0x0601)
+# quickjs は /GL (LTCG) から外す (先頭の add_compile_options の条件)。LTCG の下では解釈実行が遅く、
+# 外すと test.md の図 27 個が 942 → 708ms、数式 978 個が 1187 → 991ms になる (エンジン単体、2026-11-10)。
+# clang-cl で組むとさらに速く、図 27 個が 949 → 584ms、数式 500 個が 424 → 319ms (手元 LLVM 23.1.5)。
+# clang-cl も _MSC_VER を定義するので計算型 goto は使わず、差はコード生成による。
+# Visual Studio の ClangCL ツールセットは入っていないことがあるので、clang-cl を直接呼んで .lib を作る。
+# 見つからなければ MSVC で組む (CI の windows-2025-vs2026 には LLVM がある)。
+# Debug でも quickjs は最適化して組む。/Od では JS の呼び出しごとの C スタックが大きく、同じ kJsStackBytes で描ける
+# 数式の入れ子が Release よりずっと浅くなる (上流 322fa5bd と同じ理由)。
+option(MENDO_QUICKJS_CLANG "quickjs を clang-cl で組む (見つからなければ MSVC)" ON)
+if(MENDO_QUICKJS_CLANG)
+    find_program(MENDO_CLANG_CL clang-cl HINTS "$ENV{ProgramFiles}/LLVM/bin")
+    if(NOT MENDO_CLANG_CL)
+        message(STATUS "clang-cl が見つからないので quickjs を MSVC で組む")
+    endif()
+endif()
+if(MENDO_QUICKJS_CLANG AND MENDO_CLANG_CL)
+    # CRT はプロジェクト全体の /MT[d] に揃える (/MD で組むと数学関数が __imp_ で引かれて解決できない)。
+    set(_qjs_dir "${CMAKE_BINARY_DIR}/quickjs_clang/$<CONFIG>")
+    set(_qjs_objs "")
+    list(TRANSFORM MENDO_QUICKJS_DEFINITIONS PREPEND /D OUTPUT_VARIABLE _qjs_defs)
+    foreach(_src IN LISTS MENDO_QUICKJS_SOURCES)
+        get_filename_component(_name ${_src} NAME_WE)
+        add_custom_command(
+            OUTPUT "${_qjs_dir}/${_name}.obj"
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${_qjs_dir}"
+            COMMAND ${MENDO_CLANG_CL} /nologo /c -w /std:c11
+                "$<IF:$<CONFIG:Debug>,/O2;/Ob2;/MTd;/Z7,/O2;/MT;/DNDEBUG>"
+                ${_qjs_defs}
+                "/Fo${_qjs_dir}/${_name}.obj" "${quickjs_SOURCE_DIR}/${_src}"
+            DEPENDS "${quickjs_SOURCE_DIR}/${_src}"
+            COMMAND_EXPAND_LISTS
+            VERBATIM
+        )
+        list(APPEND _qjs_objs "${_qjs_dir}/${_name}.obj")
+    endforeach()
+    add_custom_command(
+        OUTPUT "${_qjs_dir}/quickjs.lib"
+        COMMAND ${CMAKE_AR} /nologo "/out:${_qjs_dir}/quickjs.lib" ${_qjs_objs}
+        DEPENDS ${_qjs_objs}
+        VERBATIM
+    )
+    add_custom_target(quickjs_clang DEPENDS "${_qjs_dir}/quickjs.lib")
+    add_library(quickjs INTERFACE)
+    add_dependencies(quickjs quickjs_clang)
+    target_link_libraries(quickjs INTERFACE "${_qjs_dir}/quickjs.lib")
+else()
+    list(TRANSFORM MENDO_QUICKJS_SOURCES PREPEND "${quickjs_SOURCE_DIR}/" OUTPUT_VARIABLE _qjs_srcs)
+    add_library(quickjs STATIC ${_qjs_srcs})
+    # C11 (Windows の原子操作は /experimental:c11atomics)。
+    target_compile_definitions(quickjs PRIVATE ${MENDO_QUICKJS_DEFINITIONS})
+    set_target_properties(quickjs PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS ON)
+    target_compile_options(quickjs PRIVATE /W0 /experimental:c11atomics)
+    # Debug でも最適化する (clang-cl 経路と同じ理由)。/RTC は /O2 と一緒に使えない。
+    target_compile_options(quickjs PRIVATE $<$<CONFIG:Debug>:/O2> $<$<CONFIG:Debug>:/Ob2>)
+    set_target_properties(quickjs PROPERTIES MSVC_RUNTIME_CHECKS "")
+endif()
+target_include_directories(quickjs SYSTEM INTERFACE ${quickjs_SOURCE_DIR})
 
 # pele と KaTeX はビルドの時にバイトコードにして埋め込み、実行時のコンパイルを省く。同じ quickjs で組むので版は必ず合う。
 add_executable(mendo_js_compile src/mermaid/js_compile.cpp)
