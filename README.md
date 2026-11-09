@@ -1,141 +1,142 @@
-# mendo - 高速で簡単なMarkdownビュアー
+# mendo - Fast and simple Markdown viewer
 
-Direct2D/DirectWriteで直接描画するMarkdownビュアーです。高速かつ省メモリで動作します。
+A Markdown viewer that renders directly with Direct2D/DirectWrite. It is fast and uses little memory.
 
-**日本語** | [English](docs/README.en.md) | [简体中文](docs/README.zh-CN.md) | [繁體中文](docs/README.zh-TW.md) | [한국어](docs/README.ko.md)
+[日本語](docs/README.ja.md) | **English** | [简体中文](docs/README.zh-CN.md) | [繁體中文](docs/README.zh-TW.md) | [한국어](docs/README.ko.md)
 
-![mendoのようす](example/image/mendo_light.png)
+![mendo screenshot](example/image/mendo_light.png)
 
-## インストール
+## Installation
 
-[winget](https://learn.microsoft.com/windows/package-manager/winget/) でインストールできます。
+Install via [winget](https://learn.microsoft.com/windows/package-manager/winget/):
 
 ```
 winget install tanaton.mendo
 ```
 
-## 特徴
+## Features
 
-- **高速起動** — ウインドウ生成とファイル処理を並列化する事で高速起動します。
-- **省メモリ** — Markdownの描画にブラウザを使わず、Direct2D + DirectWrite で直接描画します。
-- **ライブリロード** — 表示中ファイルの変更を検出し、自動で表示を更新します。また、変更位置に自動スクロールします。
-- **Mermaid** — ` ```mermaid ` コードブロックを図として表示します。
-- **数学記法** — `$$...$$` のブロック数式、` ```math ` コードブロック、文中の `$...$` を数式として表示します。
-- **オフライン動作** — ネットワーク接続無しで動作します。
-- **シンタックスハイライト** — 複数のプログラミング言語や設定ファイル等のコードブロックを色分け表示します。
-- **画像表示** — ローカルにあるPNG, JPEG, BMP等の画像を表示します。
-- **ナビゲーション履歴** — マウスサイドボタン / マウスジェスチャー / タッチパッドスワイプ等でブラウザスタイルの戻る/進むが動作し、スクロール位置も復元します。
-- **ドラッグ&ドロップ** — Markdownファイルをウィンドウにドロップして開けます。
-- **ファイル内検索** — タイトルバーの検索ボタンや `Ctrl+F` でファイル内を検索できます。
-- **見た目の変更** — 各ペインの表示/非表示切り替え、テーマのライト/ダーク切り替え、0.25x〜5.00xの17段階ズーム等、見た目の変更ができます。
-- **多言語 UI** — Windows の表示言語に合わせて、画面とヘルプを日本語・英語・簡体字中国語・繁体字中国語・韓国語で表示します。タイトルバーの設定ボタンからも切り替えられます。
-- **設定の永続化** — ダークモード・ズームレベル・最後に開いたファイル等を `%LOCALAPPDATA%\mendo\` に保存します。
+- **Fast startup** — Window creation and file processing run in parallel for a quick launch.
+- **Low memory usage** — Markdown is drawn directly with Direct2D + DirectWrite, without a browser engine.
+- **Live reload** — Detects changes to the open file, updates the view automatically, and scrolls to the changed position.
+- **Mermaid** — Displays ` ```mermaid ` code blocks as diagrams.
+- **Math** — Displays `$$...$$` block equations, ` ```math ` code blocks, and inline `$...$` as math.
+- **Offline** — Works without a network connection.
+- **Syntax highlighting** — Colors code blocks in many programming languages, configuration file formats, and more.
+- **Images** — Displays local PNG, JPEG, BMP, and other images.
+- **Navigation history** — Browser-style back/forward via mouse side buttons, mouse gestures, touchpad swipe, and more, with scroll position restored.
+- **Drag & Drop** — Drop a Markdown file onto the window to open it.
+- **In-file search** — Search within the file from the title bar search button or `Ctrl+F`.
+- **Customizable view** — Show/hide each pane, switch between light and dark themes, zoom in 17 steps from 0.25x to 5.00x, and more.
+- **Multilingual UI** — Shows the UI and help in Japanese, English, Simplified Chinese, Traditional Chinese, or Korean to match the Windows display language. You can also switch it from the settings button in the title bar.
+- **Persistent settings** — Dark mode, zoom level, last opened file, and more are saved to `%LOCALAPPDATA%\mendo\`.
 
-## 使い方
+## Usage
 
 ```
-mendo.exe [ファイルパス | フォルダパス] [--anchor 見出し]
+mendo.exe [filepath | folderpath] [--anchor heading]
 ```
 
-| 引数 | 表示するファイル | ファイルペインのフォルダ |
+| Argument | Document shown | File pane folder |
 |---|---|---|
-| なし | 前回のファイル | カレントフォルダ |
-| ファイル | 指定したファイル | そのファイルのフォルダ |
-| フォルダ | 前回のファイル | 指定したフォルダ |
+| none | last opened file | current directory |
+| file | the given file | the file's folder |
+| folder | last opened file | the given folder |
 
-カレントフォルダがシステムフォルダや mendo.exe のフォルダのとき（スタートメニューから起動した場合など）は、前回のファイルのフォルダを表示します。
+When the current directory is a system folder or mendo.exe's folder (e.g. launched from the Start menu), the last file's folder is shown instead.
 
-ファイルパスの後ろに `--anchor 見出し` を付けると、開いたファイルのその見出しへ移動します。見出しはリンクの `#` より後ろと同じ書き方です（例: `mendo.exe README.md --anchor 使い方`）。
+Add `--anchor <heading>` after the file path to jump to that heading in the opened file. Write the heading the same way as the part after `#` in a link (e.g. `mendo.exe README.md --anchor usage`).
 
-`Ctrl+O` またはドラッグ&ドロップでファイルを開けます。
+You can open a file with `Ctrl+O` or drag & drop.
 
-### おすすめの使い方
+### Recommended usage
 
-エクスプローラーのアドレス欄に `mendo` と入力してEnterキーを押します。
+Type `mendo` into the File Explorer address bar and press Enter.
 
-### 操作方法
+### Controls
 
-[mendo 操作ガイド](res/help_ja.md)
+[mendo User Guide](res/help_en.md)
 
-## 対応するMarkdown要素
+## Supported Markdown Elements
 
-| 要素 | 対応状況 |
+| Element | Status |
 |---|---|
-| 見出し (H1-H6) | ✅ |
-| 段落 | ✅ |
-| 太字 / 斜体 / 取り消し線 | ✅ |
-| インラインコード | ✅ |
-| コードブロック (フェンス) | ✅ シンタックスハイライト付き。対応言語: C/C++, C#, Java, Kotlin, Swift, Python, JavaScript, TypeScript, Go, Rust, Zig, Haskell, Clojure, Emacs Lisp, Common Lisp, Scheme/Racket, Lua, Vim script, PHP, Ruby, SQL, HTML, XML, CSS, SCSS, JSON, YAML, TOML, INI, Bash, PowerShell, cmd (バッチ), Dockerfile, Makefile, diff |
-| 画像 (PNG / JPEG / BMP) | ✅ 非同期読み込み |
-| Mermaidダイアグラム | ✅ Mermaid 12.1.0 に組み込まれている図に対応 |
-| 数学記法 (`$...$` / `$$...$$` / ` ```math `) | ✅ すべてディスプレイ形式で描画し、`$$...$$` のみの段落と ` ```math ` はブロック数式にする |
-| GitHub Alerts | ✅ Note / Tip / Important / Warning / Caution |
-| 脚注 (`[^1]`) | ✅ 文書末尾に番号順で表示、参照と定義を相互にリンク |
-| リンク (外部 / ページ内アンカー / ローカルの Markdown) | ✅ |
-| 順序付きリスト / 箇条書き | ✅ ネスト対応 |
-| タスクリスト | ✅ |
-| 引用 (Blockquote) | ✅ |
-| テーブル | ✅ アライメント対応 |
-| 水平線 | ✅ |
+| Headings (H1-H6) | Supported |
+| Paragraphs | Supported |
+| Bold / Italic / Strikethrough | Supported |
+| Inline code | Supported |
+| Fenced code blocks | Supported (with syntax highlighting). Languages: C/C++, C#, Java, Kotlin, Swift, Python, JavaScript, TypeScript, Go, Rust, Zig, Haskell, Clojure, Emacs Lisp, Common Lisp, Scheme/Racket, Lua, Vim script, PHP, Ruby, SQL, HTML, XML, CSS, SCSS, JSON, YAML, TOML, INI, Bash, PowerShell, cmd (batch), Dockerfile, Makefile, diff |
+| Images (PNG / JPEG / BMP) | Supported (async loading) |
+| Mermaid diagrams | Supported (diagram types built into Mermaid 12.1.0) |
+| Math (`$...$` / `$$...$$` / ` ```math `) | Supported (always rendered in display style; a paragraph consisting solely of `$$...$$` and a ` ```math ` block are rendered as block equations) |
+| GitHub Alerts | Supported (Note / Tip / Important / Warning / Caution) |
+| Footnotes (`[^1]`) | Supported (listed at the end of the document, with links between references and definitions) |
+| Links (external / page anchors / local Markdown files) | Supported |
+| Ordered / Unordered lists | Supported (nested) |
+| Task lists | Supported |
+| Blockquotes | Supported |
+| Tables | Supported (with alignment) |
+| Horizontal rules | Supported |
 
-## スクリーンショット
+## Screenshots
 
-![mendoのようす2](example/image/mendo_light2.png)
+![mendo screenshot 2](example/image/mendo_light2.png)
 
-![mendoのようす3](example/image/mendo_light3.png)
+![mendo screenshot 3](example/image/mendo_light3.png)
 
-![mendoのダークモード](example/image/mendo_dark_test.png)
+![mendo dark mode](example/image/mendo_dark_test.png)
 
-## 技術スタック
+## Tech Stack
 
-| レイヤー | 技術 |
+| Layer | Technology |
 |---|---|
-| 言語 | C++23 (MSVC) |
+| Language | C++23 (MSVC) |
 | GUI | Win32 API |
-| 2D描画 | Direct2D (`ID2D1DeviceContext`) |
-| テキスト描画 | DirectWrite (`IDWriteTextLayout`) |
-| Markdownパーサ | [md4c](https://github.com/mity/md4c) (SAX型コールバック) |
-| Mermaidダイアグラム | [pele](https://pele.run/) + [QuickJS-ng](https://github.com/quickjs-ng/quickjs) |
-| 数学記法 | [KaTeX](https://katex.org/) + [QuickJS-ng](https://github.com/quickjs-ng/quickjs) |
-| ハッシュ | [rapidhash](https://github.com/Nicoshev/rapidhash) |
-| テスト | Google Test v1.18.0 |
-| ベンチマーク | Google Benchmark v1.10.0 |
-| ビルド | CMake 4.2+ |
+| 2D rendering | Direct2D (`ID2D1DeviceContext`) |
+| Text rendering | DirectWrite (`IDWriteTextLayout`) |
+| Markdown parser | [md4c](https://github.com/mity/md4c) (SAX-style callbacks) |
+| Mermaid diagrams | [pele](https://pele.run/) + [QuickJS-ng](https://github.com/quickjs-ng/quickjs) |
+| Math | [KaTeX](https://katex.org/) + [QuickJS-ng](https://github.com/quickjs-ng/quickjs) |
+| Hashing | [rapidhash](https://github.com/Nicoshev/rapidhash) |
+| Tests | Google Test v1.18.0 |
+| Benchmarks | Google Benchmark v1.10.0 |
+| Build | CMake 4.2+ |
 
-## ビルド
+## Build
 
-### 必要なもの
+### Requirements
 
-- Windows 10 以降
-- Visual Studio 2026 (MSVC, C++23対応)
-- CMake 4.2+（Visual Studio 2026 ジェネレータ対応版）
+- Windows 10 or later
+- Visual Studio 2026 (MSVC, C++23)
+- CMake 4.2+ (required for the Visual Studio 2026 generator)
+- clang-cl (optional; used for part of the build, MSVC is used if it is not found)
 
-### ビルド手順
+### Build Steps
 
 ```
 cmake -B build
 cmake --build build --config Release
 ```
 
-生成される実行ファイル: `build/Release/mendo.exe`
+Output: `build/Release/mendo.exe`
 
-テストなしでビルドする場合:
+Build without tests:
 
 ```
 cmake -B build -DMENDO_BUILD_TESTS=OFF
 cmake --build build --config Release
 ```
 
-### テスト実行
+### Run Tests
 
 ```
 cmake --build build --config Release
 build/tests/Release/mendo_tests.exe
 ```
 
-### ベンチマーク
+### Benchmarks
 
-[Google Benchmark](https://github.com/google/benchmark) v1.10.0 でパースやレイアウトの所要時間を測ります。既定（OFF）のビルドには含まれません。
+Measures parsing and layout times with [Google Benchmark](https://github.com/google/benchmark) v1.10.0. Not included in the default (OFF) build.
 
 ```
 cmake -B build_bench -DMENDO_BUILD_BENCHMARKS=ON
@@ -143,17 +144,17 @@ cmake --build build_bench --config Release --target mendo_bench
 build_bench/bench/Release/mendo_bench.exe --benchmark_filter=FromMarkdown
 ```
 
-### Tracyプロファイラ有効ビルド
+### Build with Tracy Profiler
 
-[Tracy](https://github.com/wolfpld/tracy) v0.15.0 を組み込み、フレーム時間・ゾーン計測・カウンタ時系列プロットを取得できます。Tracy GUI 接続前は計測コードが no-op になる `TRACY_ON_DEMAND` モードで組み込まれます。
+Embeds [Tracy](https://github.com/wolfpld/tracy) v0.15.0 for frame timing, zone tracing, and counter time-series plots. Tracy is built in `TRACY_ON_DEMAND` mode, so instrumentation is a no-op until a Tracy GUI client connects.
 
 ```
 cmake -B build_tracy -DMENDO_USE_TRACY=ON
 cmake --build build_tracy --config Release
 ```
 
-## ライセンス
+## License
 
 [MIT](LICENSE)
 
-サードパーティライブラリのライセンスについては [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) を参照してください。
+See [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) for third-party library licenses.

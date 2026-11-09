@@ -2,7 +2,7 @@
 
 使用 Direct2D/DirectWrite 直接绘制的 Markdown 查看器。运行速度快，占用内存少。
 
-[日本語](../README.md) | [English](README.en.md) | **简体中文** | [繁體中文](README.zh-TW.md) | [한국어](README.ko.md)
+[日本語](README.ja.md) | [English](../README.md) | **简体中文** | [繁體中文](README.zh-TW.md) | [한국어](README.ko.md)
 
 ![mendo 截图](../example/image/mendo_light.png)
 
@@ -109,6 +109,7 @@ mendo.exe [文件路径 | 文件夹路径] [--anchor 标题]
 - Windows 10 或更高版本
 - Visual Studio 2026（MSVC，支持 C++23）
 - CMake 4.2+（支持 Visual Studio 2026 生成器的版本）
+- clang-cl（可选。用于部分构建，找不到时使用 MSVC）
 
 ### 构建步骤
 
