@@ -129,8 +129,6 @@ constexpr ThemeColor Monochrome(BrushId id, float light_alpha, float dark_alpha)
 using theme_palette::SharedColors;
 constexpr ThemeColor kThemeColors[]{
     { BrushId::Background, Rgb(0xFFFFFF), Rgb(0x1e1e1e) },
-    // GitHub のインラインコード背景 (ライトは rgba(129,139,152,0.12)、ダークは rgba(101,108,118,0.2)) を背景色に重ねた色。
-    { BrushId::InlineCodeBg, Rgb(0xf0f1f2), Rgb(0x2c2e30) },
     { BrushId::Text, Rgb(0x24292e), Rgb(0xd4d4d4) },
     { BrushId::Heading, Rgb(0x1a1a1a), Rgb(0xe0e0e0) },
     { BrushId::Link, Rgb(0x0366d6), Rgb(0x569cd6) },
@@ -140,6 +138,8 @@ constexpr ThemeColor kThemeColors[]{
     { BrushId::MutedText, Rgb(0x59636e), Rgb(0x9e9e9e) },
 
     Shared(BrushId::CodeBg, &SharedColors::code_bg),
+    // インラインコードの背景はコードブロックと同じ濃さにする。
+    Shared(BrushId::InlineCodeBg, &SharedColors::code_bg),
     Shared(BrushId::CodeText, &SharedColors::code_text),
     Shared(BrushId::Hr, &SharedColors::rule),
     Shared(BrushId::SyntaxKeyword, &SharedColors::syntax_keyword),

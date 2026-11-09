@@ -72,6 +72,21 @@ TEST(Theme, EveryBrushHasColor)
     }
 }
 
+// インラインコードの背景はコードブロックと同じ濃さにする。
+TEST(Theme, InlineCodeBackgroundMatchesCodeBlock)
+{
+    for (const auto& [name, get] : kBothThemes) {
+        SCOPED_TRACE(name);
+        const Theme& t = get();
+        const D2D1_COLOR_F& code = t.Color(BrushId::CodeBg);
+        const D2D1_COLOR_F& inline_code = t.Color(BrushId::InlineCodeBg);
+        EXPECT_FLOAT_EQ(inline_code.r, code.r);
+        EXPECT_FLOAT_EQ(inline_code.g, code.g);
+        EXPECT_FLOAT_EQ(inline_code.b, code.b);
+        EXPECT_FLOAT_EQ(inline_code.a, code.a);
+    }
+}
+
 // ---- ApplyZoom ----
 
 TEST(Theme, ApplyZoomScalesLayoutValues)
