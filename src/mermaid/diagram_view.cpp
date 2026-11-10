@@ -1,10 +1,12 @@
 #include "diagram_view.h"
 #include "d2d_util.h"
 #include "diagram_raster.h"
+#include "file_io.h"
 #include "i18n.h"
 #include "pane_layout.h"
 #include "resource.h"
 #include "ui_constants.h"
+#include "wic_util.h"
 #include "win32_util.h"
 #include <d2d1_3.h>
 #include <d3d11.h>
@@ -22,6 +24,14 @@ namespace {
 // 8 倍は試作で確かめた範囲。
 constexpr float kZoomStops[]{ 0.05f, 0.1f, 0.25f, 0.33f, 0.5f, 0.67f, 0.75f, 1.0f, 1.25f, 1.5f, 2.0f, 3.0f, 4.0f, 6.0f, 8.0f };
 constexpr float kPadding = 16.0f;
+
+// 本文の ImageLoader と同じ上限に揃える。
+constexpr LONGLONG kMaxImageFileSize = 256LL * 1024 * 1024;
+
+// プレビュー用の画素数を抑える。
+constexpr UINT kMaxImageLongEdge = 8192;
+
+constexpr std::wstring_view kImageTitle = L"Image Viewer";
 
 constexpr std::wstring_view kWindowClass = L"mendo_MermaidViewer";
 // 最初の大きさ。本体に対する割合。
@@ -98,6 +108,46 @@ std::optional<float> diagram_view::NextZoom(float zoom, float fit_zoom, int dir)
     return it == used.begin() ? std::nullopt : std::optional{ *std::prev(it) };
 }
 
+D2D1_SIZE_F diagram_view::ImageDipSize(UINT pixel_width, UINT pixel_height, float dpi_scale) noexcept
+{
+    if (dpi_scale <= 0.0f) {
+        return { static_cast<float>(pixel_width), static_cast<float>(pixel_height) };
+    }
+    return { static_cast<float>(pixel_width) / dpi_scale, static_cast<float>(pixel_height) / dpi_scale };
+}
+
+int diagram_view::WheelZoom::Accumulate(int delta) noexcept
+{
+    if (delta == 0) {
+        return 0;
+    }
+    if ((delta > 0) != (remainder > 0)) {
+        remainder = 0;
+    }
+    remainder += delta;
+    const int steps = remainder / WHEEL_DELTA;
+    remainder -= steps * WHEEL_DELTA;
+    return steps;
+}
+
+std::optional<diagram_view::DecodedImage> diagram_view::DecodeImage(IWICImagingFactory* wic, const std::wstring& path, UINT max_bitmap_dim)
+{
+    if (!wic || path.empty() || !path_util::IsLocalPath(path)) {
+        return std::nullopt;
+    }
+    const auto bytes = ReadAllBytes(path.c_str(), nullptr, path_util::kFileShareRWDelete, kMaxImageFileSize);
+    const auto decoded = wic_util::DecodeImageFileFromMemory(wic, bytes);
+    if (!decoded || decoded->pixel_width == 0 || decoded->pixel_height == 0) {
+        return std::nullopt;
+    }
+    const UINT max_dim = max_bitmap_dim ? std::min(max_bitmap_dim, kMaxImageLongEdge) : kMaxImageLongEdge;
+    const auto target = wic_util::ComputeDecodeSize(decoded->pixel_width, decoded->pixel_height, 0, max_dim);
+    auto bitmap = wic_util::DecodeToWicBitmap(wic, *decoded, target);
+    if (!bitmap) {
+        return std::nullopt;
+    }
+    return DecodedImage{ std::move(bitmap), decoded->pixel_width, decoded->pixel_height };
+}
 DiagramView::DiagramView(ID3D11Device* d3d, ID2D1Device* device, IDWriteFactory* dw, IWICImagingFactory* wic, std::move_only_function<void()> on_close)
     : on_close_(std::move(on_close)), dw_(dw), wic_(wic), d3d_(d3d), device_(device)
 {}
@@ -212,7 +262,9 @@ LRESULT CALLBACK DiagramView::WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM
 
 void DiagramView::ApplyLanguage()
 {
-    SetWindowTextW(hwnd_, i18n::S().viewer_title.data());
+    if (!image_wic_) {
+        SetWindowTextW(hwnd_, i18n::S().viewer_title.data());
+    }
     // 倍率と読み込み中は 13px、ボタンの記号は 16px。
     const auto make = [&](float size) {
         return CreateTextFormat(dw_.Get(), { .family = L"Segoe UI",
@@ -238,8 +290,14 @@ void DiagramView::SetDarkMode(bool dark)
 
 void DiagramView::ShowLoading()
 {
+    wheel_zoom_ = {};
     drawing_.reset();
+    image_wic_.Reset();
+    image_bitmap_.Reset();
+    image_pixel_width_ = 0;
+    image_pixel_height_ = 0;
     commands_.Reset();
+    SetWindowTextW(hwnd_, i18n::S().viewer_title.data());
     HoverAt(Button::None);
     Layout();
 }
@@ -248,6 +306,11 @@ void DiagramView::SetDrawing(std::shared_ptr<const mermaid_util::DiagramDrawing>
 {
     const bool keep = drawing_ != nullptr;
     drawing_ = std::move(drawing);
+    image_wic_.Reset();
+    image_bitmap_.Reset();
+    image_pixel_width_ = 0;
+    image_pixel_height_ = 0;
+    SetWindowTextW(hwnd_, i18n::S().viewer_title.data());
     commands_.Reset();
     if (keep) {
         Layout();
@@ -255,6 +318,53 @@ void DiagramView::SetDrawing(std::shared_ptr<const mermaid_util::DiagramDrawing>
     else {
         Fit();
     }
+}
+
+bool DiagramView::LoadImage(const std::wstring& path)
+{
+    if (!EnsureTarget()) {
+        return false;
+    }
+    auto image = diagram_view::DecodeImage(wic_.Get(), path, MaxBitmapDim(target_.dc()));
+    if (!image) {
+        return false;
+    }
+    ComPtr<ID2D1Bitmap> bitmap;
+    if (FAILED(target_.dc()->CreateBitmapFromWicBitmap(image->bitmap.Get(), &bitmap))) {
+        return false;
+    }
+    drawing_.reset();
+    commands_.Reset();
+    image_wic_ = std::move(image->bitmap);
+    image_bitmap_ = std::move(bitmap);
+    image_pixel_width_ = image->pixel_width;
+    image_pixel_height_ = image->pixel_height;
+    SetWindowTextW(hwnd_, kImageTitle.data());
+    Fit();
+    return true;
+}
+
+ID2D1Bitmap* DiagramView::ImageBitmap()
+{
+    if (!image_wic_) {
+        return nullptr;
+    }
+    if (image_bitmap_) {
+        return image_bitmap_.Get();
+    }
+    if (FAILED(target_.dc()->CreateBitmapFromWicBitmap(image_wic_.Get(), &image_bitmap_)) || !image_bitmap_) {
+        image_bitmap_.Reset();
+        return nullptr;
+    }
+    return image_bitmap_.Get();
+}
+
+D2D1_SIZE_F DiagramView::ContentSize() const noexcept
+{
+    if (drawing_) {
+        return { drawing_->width, drawing_->height };
+    }
+    return image_wic_ ? ImageSize() : D2D1_SIZE_F{};
 }
 
 float DiagramView::Scale() const noexcept
@@ -296,6 +406,8 @@ void DiagramView::ReleaseTarget() noexcept
     brush_.Reset();
     record_dc_.Reset();
     commands_.Reset();
+    // ビットマップは描画先をまたいで使えない。
+    image_bitmap_.Reset();
 }
 
 void DiagramView::SetDevice(ID3D11Device* d3d, ID2D1Device* device)
@@ -309,11 +421,12 @@ void DiagramView::SetDevice(ID3D11Device* d3d, ID2D1Device* device)
 
 D2D1_POINT_2F DiagramView::Origin() const noexcept
 {
+    const D2D1_SIZE_F size = ContentSize();
     const float zoom = Zoom();
-    const auto place = [zoom](float size, float view, float scroll) {
-        return ContentExtent(size, zoom) <= view ? (view - size * zoom) / 2.0f : kPadding - scroll;
+    const auto place = [zoom](float extent, float view, float scroll) {
+        return ContentExtent(extent, zoom) <= view ? (view - extent * zoom) / 2.0f : kPadding - scroll;
     };
-    return { place(drawing_->width, view_width_, scroll_x_), place(drawing_->height, view_height_, scroll_y_) };
+    return { place(size.width, view_width_, scroll_x_), place(size.height, view_height_, scroll_y_) };
 }
 
 void DiagramView::Paint()
@@ -339,6 +452,14 @@ void DiagramView::Paint()
             rt->DrawImage(commands_.Get());
             rt->SetTransform(D2D1::Matrix3x2F::Identity());
         }
+        PaintBar();
+    }
+    else if (ID2D1Bitmap* const image = ImageBitmap()) {
+        const D2D1_SIZE_F size = ImageSize();
+        const D2D1_POINT_2F origin = Origin();
+        rt->SetTransform(D2D1::Matrix3x2F::Scale(Zoom(), Zoom()) * D2D1::Matrix3x2F::Translation(origin.x, origin.y));
+        rt->DrawBitmap(image, D2D1::RectF(0.0f, 0.0f, size.width, size.height), 1.0f, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
+        rt->SetTransform(D2D1::Matrix3x2F::Identity());
         PaintBar();
     }
     else if (fmt_label_) {
@@ -398,7 +519,7 @@ bool DiagramView::IsEnabled(Button button) const noexcept
 
 DiagramView::Button DiagramView::HitButton(float x, float y) const noexcept
 {
-    if (!drawing_) {
+    if (!HasContent()) {
         return Button::None;
     }
     for (const Button b : { Button::ZoomOut, Button::ZoomIn, Button::Fit }) {
@@ -476,8 +597,9 @@ void DiagramView::Layout()
         if (target_.dc() && !target_.Resize(static_cast<UINT>(rc.right), static_cast<UINT>(rc.bottom), scale * DEFAULT_DPI)) {
             ReleaseTarget();
         }
-        if (drawing_) {
-            fit_zoom_ = diagram_view::FitZoom(view_width_, view_height_, drawing_->width, drawing_->height);
+        if (HasContent()) {
+            const D2D1_SIZE_F size = ContentSize();
+            fit_zoom_ = diagram_view::FitZoom(view_width_, view_height_, size.width, size.height);
         }
         UpdateScrollBars();
         RECT after{};
@@ -504,17 +626,20 @@ void DiagramView::UpdateScrollBars()
         }
         SetScrollInfo(hwnd_, bar, &si, TRUE);
     };
-    apply(SB_HORZ, drawing_ ? ContentExtent(drawing_->width, Zoom()) : 0.0f, view_width_, scroll_x_);
-    apply(SB_VERT, drawing_ ? ContentExtent(drawing_->height, Zoom()) : 0.0f, view_height_, scroll_y_);
+    const bool has_content = HasContent();
+    const D2D1_SIZE_F size = ContentSize();
+    apply(SB_HORZ, has_content ? ContentExtent(size.width, Zoom()) : 0.0f, view_width_, scroll_x_);
+    apply(SB_VERT, has_content ? ContentExtent(size.height, Zoom()) : 0.0f, view_height_, scroll_y_);
 }
 
 void DiagramView::ScrollTo(float x, float y)
 {
-    if (!drawing_) {
+    if (!HasContent()) {
         return;
     }
-    x = std::clamp(x, 0.0f, MaxScroll(ContentExtent(drawing_->width, Zoom()), view_width_));
-    y = std::clamp(y, 0.0f, MaxScroll(ContentExtent(drawing_->height, Zoom()), view_height_));
+    const D2D1_SIZE_F size = ContentSize();
+    x = std::clamp(x, 0.0f, MaxScroll(ContentExtent(size.width, Zoom()), view_width_));
+    y = std::clamp(y, 0.0f, MaxScroll(ContentExtent(size.height, Zoom()), view_height_));
     // 端を越えて送っても描き直さない。
     if (x == scroll_x_ && y == scroll_y_) {
         return;
@@ -564,18 +689,41 @@ void DiagramView::Scroll(int bar, WORD request)
 
 void DiagramView::SetZoom(float zoom)
 {
+    SetZoomAt(zoom, { view_width_ / 2.0f, view_height_ / 2.0f });
+}
+
+void DiagramView::SetZoomAt(float zoom, D2D1_POINT_2F anchor)
+{
     const D2D1_POINT_2F before = Origin();
-    // 窓の中央にある図の上の点 (倍率 1 の座標)。
-    const float ax = (view_width_ / 2.0f - before.x) / Zoom();
-    const float ay = (view_height_ / 2.0f - before.y) / Zoom();
+    // anchor の下にある中身の上の点 (倍率 1 の座標)。
+    const float ax = (anchor.x - before.x) / Zoom();
+    const float ay = (anchor.y - before.y) / Zoom();
     manual_zoom_ = zoom;
     Layout();
-    // 新しい倍率で同じ点が中央に来るスクロール位置。余白込みの面では図の左上が kPadding にある。
-    ScrollTo(kPadding + ax * zoom - view_width_ / 2.0f, kPadding + ay * zoom - view_height_ / 2.0f);
+    // 新しい倍率でも同じ点が anchor に来るスクロール位置。余白込みの面では中身の左上が kPadding にある。
+    ScrollTo(kPadding + ax * zoom - anchor.x, kPadding + ay * zoom - anchor.y);
+}
+
+void DiagramView::ZoomByWheel(int delta, D2D1_POINT_2F anchor)
+{
+    if (!HasContent()) {
+        return;
+    }
+    const int steps = wheel_zoom_.Accumulate(delta);
+    // 1 ノッチずつ止まる位置へ動かす。端ではそれ以上動かない。
+    const int dir = steps > 0 ? 1 : -1;
+    for (int i = 0; i < std::abs(steps); ++i) {
+        const auto next = diagram_view::NextZoom(Zoom(), fit_zoom_, dir);
+        if (!next) {
+            break;
+        }
+        SetZoomAt(*next, anchor);
+    }
 }
 
 void DiagramView::Fit()
 {
+    wheel_zoom_ = {};
     manual_zoom_.reset();
     scroll_x_ = 0.0f;
     scroll_y_ = 0.0f;
@@ -584,7 +732,7 @@ void DiagramView::Fit()
 
 void DiagramView::Step(int dir)
 {
-    if (const auto next = drawing_ ? diagram_view::NextZoom(Zoom(), fit_zoom_, dir) : std::nullopt) {
+    if (const auto next = HasContent() ? diagram_view::NextZoom(Zoom(), fit_zoom_, dir) : std::nullopt) {
         SetZoom(*next);
     }
 }
@@ -658,9 +806,17 @@ bool DiagramView::HandleMessage(UINT msg, WPARAM wparam, LPARAM lparam, LRESULT&
 
     case WM_MOUSEWHEEL:
     case WM_MOUSEHWHEEL: {
-        // ホイールはスクロール (GitHub と同じ)。Shift で横。倍率はボタンとキーで変える。
+        // Ctrl を押したホイールは倍率 (ポインタの下を動かさない)。押していなければスクロール (GitHub と同じ) で、Shift は横。
+        const int raw_delta = GET_WHEEL_DELTA_WPARAM(wparam);
+        if (msg == WM_MOUSEWHEEL && (GET_KEYSTATE_WPARAM(wparam) & MK_CONTROL)) {
+            POINT pt{ GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam) };
+            ScreenToClient(hwnd_, &pt);
+            ZoomByWheel(raw_delta, ToDip(MAKELPARAM(pt.x, pt.y)));
+            return true;
+        }
+        wheel_zoom_ = {};
         const UINT lines = WheelScrollLines();
-        const float notches = static_cast<float>(GET_WHEEL_DELTA_WPARAM(wparam)) / WHEEL_DELTA;
+        const float notches = static_cast<float>(raw_delta) / WHEEL_DELTA;
         const bool horizontal = msg == WM_MOUSEHWHEEL || (GET_KEYSTATE_WPARAM(wparam) & MK_SHIFT);
         const float step = lines == WHEEL_PAGESCROLL ? (horizontal ? view_width_ : view_height_) * kPageRatio : kLineStep * static_cast<float>(lines);
         // 縦のホイールは前へ回すと上へ、横のホイールは右へ倒すと右へ。
@@ -684,7 +840,7 @@ bool DiagramView::HandleMessage(UINT msg, WPARAM wparam, LPARAM lparam, LRESULT&
             }
             Invalidate();
         }
-        else if (drawing_) {
+        else if (HasContent()) {
             pointer_ = PointerDragging{ p };
             SetCapture(hwnd_);
             SetCursor(LoadCursorW(nullptr, IDC_SIZEALL));
@@ -792,6 +948,16 @@ bool DiagramView::HandleMessage(UINT msg, WPARAM wparam, LPARAM lparam, LRESULT&
             return false;
         }
 
+    case WM_KEYUP:
+        if (wparam == VK_CONTROL) {
+            wheel_zoom_ = {};
+        }
+        return false;
+
+    case WM_KILLFOCUS:
+        wheel_zoom_ = {};
+        return false;
+
     // キーの配置に依らず、打った文字で倍率を変える。
     case WM_CHAR:
         if (IsKeyDown(VK_CONTROL) || IsKeyDown(VK_MENU)) {
@@ -806,7 +972,7 @@ bool DiagramView::HandleMessage(UINT msg, WPARAM wparam, LPARAM lparam, LRESULT&
             Step(-1);
             return true;
         case L'0':
-            if (drawing_) {
+            if (HasContent()) {
                 Fit();
             }
             return true;

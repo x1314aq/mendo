@@ -103,6 +103,9 @@ public:
     // 図を別ウィンドウ (1 枚だけ) に開く。開いていれば中身を差し替える。code (UTF-8) は内部でコピーする。
     // node は呼び出し側の図の目印で、窓と一緒に消える (ViewerNode)。
     void OpenViewer(std::string_view code, int node, bool dark_mode);
+    // 画像 (PNG など WIC が読める形式) を同じ窓に開く。開いていれば中身を差し替える。
+    // 読めなければ窓を閉じて on_viewer_failed を呼ぶ。path は解決済みのローカルの絶対パス。
+    void OpenImageViewer(std::wstring_view path, bool dark_mode);
     void CloseViewer();
     // 拡大表示は本文と同じ結果 (cache_) を使う。本文が描いた図はその描画命令をそのまま出し、無ければ表示用の要求として
     // 描かせる (同じ図を本文用と 2 回描かない。本文と同じ折り返しになる)。
@@ -110,14 +113,15 @@ public:
     // 開いていれば、倍率と位置を保って新しいテーマの図に差し替える。
     void SetViewerDarkMode(bool dark_mode);
     // 開いている図のコード。閉じていれば nullopt (図を空にして保存すると、開いていてもコードは空になる)。
+    // 画像を出しているときも nullopt。
     std::optional<std::string_view> ViewerCode() const noexcept
     {
-        return ViewerOpen() ? std::optional<std::string_view>{ viewer_.code } : std::nullopt;
+        return ViewerOpen() && !viewer_.image ? std::optional<std::string_view>{ viewer_.code } : std::nullopt;
     }
-    // 開いている図の目印。閉じていれば -1。読み直しで図を見失ったら SetViewerNode(-1) にする。
+    // 開いている図の目印。閉じているか画像を出していれば -1。読み直しで図を見失ったら SetViewerNode(-1) にする。
     int ViewerNode() const noexcept
     {
-        return ViewerOpen() ? viewer_.node : -1;
+        return ViewerOpen() && !viewer_.image ? viewer_.node : -1;
     }
     void SetViewerNode(int node) noexcept
     {
@@ -163,6 +167,8 @@ private:
         int node = -1;
         // code の図の結果をまだ窓に渡していない。
         bool pending = false;
+        // 画像を出している。図の要求 (書き換えの追従) はしない。
+        bool image = false;
     };
 
     enum class JobWork : uint8_t {
@@ -225,6 +231,8 @@ private:
     }
     // 拡大表示に出す図が変わった。待ちの印を付け、on_update で頼ませる (印だけだと窓が読み込み中のまま残る)。
     void AwaitViewerDrawing();
+    // 拡大表示の窓を作る。作れなければ on_viewer_failed を呼んで false。
+    bool OpenViewerWindow(bool dark_mode);
     void FailViewer();
 
     // 最初に図か数式を描くときに作る。bg のワーカーが使うので、UI スレッドで投げる前に呼ぶ。

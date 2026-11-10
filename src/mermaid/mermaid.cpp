@@ -446,13 +446,17 @@ void MermaidRenderer::RequestMathBatch(std::vector<InlineMathItem> items, MathBa
 void MermaidRenderer::OpenViewer(std::string_view code, int node, bool dark_mode)
 {
     const bool open = ViewerOpen();
-    viewer_.node = node;
+    // 画像を出していたなら、同じコードの図でも出し直す (画像のまま返さない)。
+    const bool was_image = viewer_.image;
     if (open) {
         viewer_.view->BringToFront();
-        if (viewer_.code == code) {
+        if (!was_image && viewer_.code == code) {
+            viewer_.node = node;
             return;
         }
     }
+    viewer_.image = false;
+    viewer_.node = node;
     viewer_.code.assign(code);
     if (open) {
         viewer_.view->ShowLoading();
@@ -465,18 +469,53 @@ void MermaidRenderer::OpenViewer(std::string_view code, int node, bool dark_mode
     AwaitViewerDrawing();
 }
 
+void MermaidRenderer::OpenImageViewer(std::wstring_view path, bool dark_mode)
+{
+    const bool open = ViewerOpen();
+    if (open) {
+        viewer_.view->BringToFront();
+    }
+    else if (!OpenViewerWindow(dark_mode)) {
+        return;
+    }
+    // 画像は図のキャッシュにもディスクキャッシュにも乗らないので、待ちの図は渡さない。
+    viewer_.pending = false;
+    viewer_.image = true;
+    viewer_.code.clear();
+    viewer_.node = -1;
+    // 読めない画像 (消えた・非対応・上限超え) で空の窓を残さない。図のときと同じ知らせ方をする。
+    if (!viewer_.view->LoadImage(std::wstring{ path })) {
+        FailViewer();
+    }
+}
+
+bool MermaidRenderer::OpenViewerWindow(bool dark_mode)
+{
+    viewer_.view = open_viewer_(hwnd_, d2d_factory_.Get(), dw_factory_.Get(), wic_factory_.Get(), dark_mode, [this] { CloseViewer(); });
+    if (!viewer_.view) {
+        // 窓が作れなかった (開けなかった) ときだけ知らせる。図が描けないときとは別。
+        viewer_ = {};
+        on_viewer_failed_();
+        return false;
+    }
+    return true;
+}
+
 void MermaidRenderer::SetViewerDarkMode(bool dark_mode)
 {
     if (!ViewerOpen()) {
         return;
     }
     viewer_.view->SetDarkMode(dark_mode);
-    AwaitViewerDrawing();
+    // 画像は背景の色だけ変える (描き直すものが無い)。
+    if (!viewer_.image) {
+        AwaitViewerDrawing();
+    }
 }
 
 void MermaidRenderer::UpdateViewerCode(std::string_view code)
 {
-    if (!ViewerOpen() || viewer_.code == code) {
+    if (!ViewerOpen() || viewer_.image || viewer_.code == code) {
         return;
     }
     viewer_.code.assign(code);

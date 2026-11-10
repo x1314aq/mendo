@@ -10,6 +10,7 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <string>
 #include <variant>
 
 struct ID2D1DeviceContext5;
@@ -21,6 +22,24 @@ float FitZoom(float view_width, float view_height, float natural_width, float na
 // dir (+1 / -1) の向きの次の倍率。全体表示の倍率も止まる位置にし、そのすぐ隣の値は 1 回押しても見た目が変わらないので除く。
 // 端なら nullopt。
 std::optional<float> NextZoom(float zoom, float fit_zoom, int dir) noexcept;
+
+// 画像の表示寸法 (DIP)。画像の 1 px を物理 1 px で描くので、本文の画像と 100% が揃う。
+D2D1_SIZE_F ImageDipSize(UINT pixel_width, UINT pixel_height, float dpi_scale) noexcept;
+
+struct DecodedImage {
+    Microsoft::WRL::ComPtr<IWICBitmap> bitmap;
+    UINT pixel_width = 0;
+    UINT pixel_height = 0;
+};
+
+// 縮小デコードしても表示の原寸は保つ。ファイルを閉じた後も bitmap 単体で使える。
+std::optional<DecodedImage> DecodeImage(IWICImagingFactory* wic, const std::wstring& path, UINT max_bitmap_dim);
+
+// 高精度ホイールの端数を次のノッチに持ち越す。
+struct WheelZoom {
+    int remainder = 0;
+    int Accumulate(int delta) noexcept;
+};
 
 } // namespace diagram_view
 
@@ -39,11 +58,14 @@ public:
     virtual void ShowLoading() = 0;
     // 図が出ていれば位置とボタンで変えた倍率を保つ (保存とテーマの切り替え)。全体表示のままなら新しい大きさに合わせ直す。
     virtual void SetDrawing(std::shared_ptr<const mermaid_util::DiagramDrawing> drawing) = 0;
+    // 画像 (PNG など WIC が読める形式) を同じ窓に開く。読めなければ false (呼び出し側が窓を閉じる)。
+    virtual bool LoadImage(const std::wstring& path) = 0;
     // 本体の描画デバイスを作り直した。次の描画から新しいデバイスで描く。
     virtual void SetDevice(ID3D11Device* d3d, ID2D1Device* device) = 0;
 };
 
-// 図の拡大表示の窓。図の描画命令を倍率を変えて描き、右上のボタン・ホイール (スクロール)・ドラッグ・キーで操作する。
+// 図と PNG 画像の拡大表示の窓。図の描画命令 (またはデコードした画像) を倍率を変えて描き、
+// 右上のボタン・ホイール (スクロール。Ctrl を押しながらで倍率)・ドラッグ・キーで操作する。
 // PopupWindow はキャプチャを取り、ホイールを本体へ渡し、非アクティブで閉じるので、見ながら操作するこの窓には使えない。
 class DiagramView final : public IDiagramViewer {
 public:
@@ -64,15 +86,27 @@ public:
     {
         return hwnd_ != nullptr;
     }
+    // 図を出している (画像ではない)。
     bool HasDrawing() const noexcept override
     {
         return drawing_ != nullptr;
     }
+    // 図か画像を出している。
+    bool HasContent() const noexcept
+    {
+        return drawing_ != nullptr || image_wic_ != nullptr;
+    }
     void BringToFront() const noexcept override;
+    // タイトル・ボタンのツールチップ・読み込み中の文言を、表示中の言語にする。
     void ApplyLanguage() override;
     void SetDarkMode(bool dark) override;
+    // 別の図を開いた。
     void ShowLoading() override;
+    // 図が出ていれば位置とボタンで変えた倍率を保つ (保存とテーマの切り替え)。全体表示のままなら新しい大きさに合わせ直す。
     void SetDrawing(std::shared_ptr<const mermaid_util::DiagramDrawing> drawing) override;
+    // 画像 (PNG など WIC が読める形式) を開く。UI スレッドで 1 度だけデコードする (1 回の操作で、大きさの上限で抑える)。
+    // 読めなければ false (呼び出し側が窓を閉じる)。
+    bool LoadImage(const std::wstring& path) override;
     void SetDevice(ID3D11Device* d3d, ID2D1Device* device) override;
 
 private:
@@ -95,10 +129,19 @@ private:
     void ReleaseTarget() noexcept;
     void Paint();
     void PaintBar();
-    // 窓と図の大きさから全体表示の倍率と、スクロールの範囲を決め直す。
+    // 窓と中身の大きさから全体表示の倍率と、スクロールの範囲を決め直す。
     void Layout();
     void UpdateScrollBars();
-    // 図の左上を置く位置 (DIP)。図が窓より小さい向きは中央に置く。
+    // 中身の原寸 (DIP)。図は CSS px、画像はピクセルを DPI の倍率で割った値。中身が無ければ 0。
+    D2D1_SIZE_F ContentSize() const noexcept;
+    // 画像の D2D ビットマップを描画先に載せる。描画先を作り直したら捨てるので、その都度作る。
+    ID2D1Bitmap* ImageBitmap();
+    // 画像の表示寸法 (DIP)。今の DPI で割るので、DPI が変わると Layout が新しい値で組み直す。
+    D2D1_SIZE_F ImageSize() const noexcept
+    {
+        return diagram_view::ImageDipSize(image_pixel_width_, image_pixel_height_, Scale());
+    }
+    // 中身の左上を置く位置 (DIP)。中身が窓より小さい向きは中央に置く。
     D2D1_POINT_2F Origin() const noexcept;
     void ScrollTo(float x, float y);
     void ScrollBy(float dx, float dy)
@@ -115,6 +158,10 @@ private:
     }
     // 窓の中央に見えている点を動かさずに倍率を変える。
     void SetZoom(float zoom);
+    // anchor (窓の中の点、DIP) の下にある中身の点を動かさずに倍率を変える。ホイールはポインタの位置を渡す。
+    void SetZoomAt(float zoom, D2D1_POINT_2F anchor);
+    // ホイールのデルタで倍率を 1 ノッチずつ変える。anchor はポインタの位置。
+    void ZoomByWheel(int delta, D2D1_POINT_2F anchor);
     Button HitButton(float x, float y) const noexcept;
     D2D1_RECT_F ButtonRect(Button button) const noexcept;
     D2D1_RECT_F BarRect() const noexcept;
@@ -146,6 +193,14 @@ private:
     Microsoft::WRL::ComPtr<IDWriteTextFormat> fmt_symbol_;
 
     std::shared_ptr<const mermaid_util::DiagramDrawing> drawing_;
+    // デバイスを失ってもデコードし直さずに済むよう、CPU 側の画素も残す。
+    Microsoft::WRL::ComPtr<IWICBitmapSource> image_wic_;
+    Microsoft::WRL::ComPtr<ID2D1Bitmap> image_bitmap_;
+    // 画像の原寸 (px)。DIP は DPI の倍率で割って求めるので、DPI が変わっても原寸はそのまま。
+    UINT image_pixel_width_ = 0;
+    UINT image_pixel_height_ = 0;
+    // ホイールで倍率を変えるときの、次のノッチに持ち越す端数。
+    diagram_view::WheelZoom wheel_zoom_;
     bool dark_ = false;
     Tooltip tooltip_;
 

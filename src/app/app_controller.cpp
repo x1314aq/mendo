@@ -463,6 +463,16 @@ std::optional<LinkHit> LinkAtHit(const AppState& state, const hit_test::HitResul
     return node ? FindLinkHitAtPosition(*node, hit.char_pos) : std::nullopt;
 }
 
+std::optional<ImageHit> ImageAtHit(const AppState& state, const hit_test::HitResult& hit)
+{
+    const auto& nodes = state.document.doc.GetNodes();
+    const Node* node = NodeAt(nodes, hit.node_index);
+    if (!node || hit.char_pos == hit_test::HitResult::kNoChar) {
+        return std::nullopt;
+    }
+    return FindImageHitAtPosition(*node, hit.char_pos);
+}
+
 std::optional<LinkHit> LinkAtPoint(const AppState& state, const PaneLayout& layout, DipPoint window_dip)
 {
     const auto hit_ctx = MakeMdPaneHitContext(state, layout, window_dip);

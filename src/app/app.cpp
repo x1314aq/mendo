@@ -1270,10 +1270,27 @@ void App::OnLButtonUp(int px, int py)
     if (!small_click || state_.view.viewport.GetSelection().active()) {
         return;
     }
+    // 画像を包むリンクがあればリンクを優先する (今までどおり)。画像そのものは Ctrl+クリックで別窓に開く。
     if (const auto link = app_controller::LinkAtHit(state_, hit)) {
         // ファイル一覧の項目と同じく Ctrl+クリックは新しいウィンドウ。
         HandleLinkClick(link->url, IsKeyDown(VK_CONTROL));
+        return;
     }
+    if (IsKeyDown(VK_CONTROL)) {
+        if (const auto image = app_controller::ImageAtHit(state_, hit)) {
+            PreviewImage(image->src);
+        }
+    }
+}
+
+// 本文の画像を拡大表示の窓で開く。開かない画像 (URL・ネットワーク上) は ResolveLocalPath が空で返す。
+void App::PreviewImage(std::string_view src)
+{
+    const std::wstring path = ResolveLocalPath(src, state_.document.doc.GetDirectory());
+    if (path.empty()) {
+        return;
+    }
+    mermaid_renderer_.OpenImageViewer(path, theme_service_.IsDarkMode());
 }
 
 void App::OnMouseMove(int px, int py)

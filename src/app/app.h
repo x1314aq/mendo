@@ -252,6 +252,8 @@ private:
     // ---- クリック (判定は app_controller::Resolve*Hit) ----
     // new_window: Ctrl+クリック・中クリック。ローカルの文書を新しいウィンドウで開く。
     void HandleLinkClick(std::string_view url, bool new_window);
+    // 本文の画像を拡大表示の窓で開く。src は文書に書かれたまま。
+    void PreviewImage(std::string_view src);
     bool HandleTitleBarClick(float dip_x, float dip_y);
     void HandleSearchBarClick(SearchBarHitZone zone, float dip_x, bool is_double_click);
     void HandleMdPaneClick(float dip_x, float dip_y, int px, int py, bool is_double_click);

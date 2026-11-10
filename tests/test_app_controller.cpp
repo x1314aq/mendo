@@ -52,6 +52,33 @@ struct KeyCase {
 
 } // namespace
 
+TEST(AppControllerTest, ImageHitRequiresACharacterInsideAnImage)
+{
+    AppState state;
+    state.document.doc = Document::FromMarkdown("text ![picture](image.png) tail", L"C:\\test.md");
+    const auto image = app_controller::ImageAtHit(state, { .node_index = 0, .text_pos = 12, .char_pos = 5 });
+    ASSERT_TRUE(image);
+    EXPECT_EQ(image->src, "image.png");
+    EXPECT_EQ(image->alt, "picture");
+    EXPECT_FALSE(app_controller::ImageAtHit(state, { .node_index = 0, .char_pos = 0 }));
+    EXPECT_FALSE(app_controller::ImageAtHit(state, { .node_index = 0, .text_pos = 5 }));
+    EXPECT_FALSE(app_controller::ImageAtHit(state, { .node_index = -1, .char_pos = 5 }));
+    EXPECT_FALSE(app_controller::ImageAtHit(state, { .node_index = 1, .char_pos = 5 }));
+}
+
+TEST(AppControllerTest, LinkedImageRetainsItsLinkTarget)
+{
+    AppState state;
+    state.document.doc = Document::FromMarkdown("[![picture](image.png)](target.md)", L"C:\\test.md");
+    const hit_test::HitResult hit{ .node_index = 0, .char_pos = 0 };
+    const auto link = app_controller::LinkAtHit(state, hit);
+    ASSERT_TRUE(link);
+    EXPECT_EQ(link->url, "target.md");
+    const auto image = app_controller::ImageAtHit(state, hit);
+    ASSERT_TRUE(image);
+    EXPECT_EQ(image->src, "image.png");
+}
+
 TEST(AppControllerTest, HandleKeyDown)
 {
     const KeyCase kCases[] = {
