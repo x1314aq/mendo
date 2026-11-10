@@ -73,6 +73,7 @@ TEST(AppControllerTest, HandleKeyDown)
         { "Ctrl+Shift+C", { .key = 'C', .ctrl = true, .shift = true }, AppCommand::CopyFormatted },
         { "Ctrl+A", { .key = 'A', .ctrl = true }, SelectAllAction{} },
         { "Ctrl+O", { .key = 'O', .ctrl = true }, AppCommand::OpenFile },
+        { "Ctrl+Shift+O", { .key = 'O', .ctrl = true, .shift = true }, AppCommand::ShowRecentFiles },
         { "Ctrl+N", { .key = 'N', .ctrl = true }, AppCommand::NewWindow },
         { "Ctrl+N repeat", { .key = 'N', .ctrl = true, .repeat = true }, std::nullopt },
         { "N without Ctrl", { .key = 'N' }, std::nullopt },
@@ -119,6 +120,7 @@ TEST(AppControllerTest, TitleBarClickBinding)
     };
     const Case kCases[]{
         { TitleBarHitZone::OpenFile, AppCommand::OpenFile },
+        { TitleBarHitZone::RecentFiles, AppCommand::ShowRecentFiles },
         { TitleBarHitZone::Help, ShowHelpAction{} },
         { TitleBarHitZone::Search, OpenSearchBarAction{} },
         { TitleBarHitZone::ThemeToggle, AppCommand::ToggleDarkMode },

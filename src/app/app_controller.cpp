@@ -57,6 +57,8 @@ std::optional<AppBinding> TitleBarClickBinding(TitleBarHitZone zone)
     switch (zone) {
     case TitleBarHitZone::OpenFile:
         return AppCommand::OpenFile;
+    case TitleBarHitZone::RecentFiles:
+        return AppCommand::ShowRecentFiles;
     case TitleBarHitZone::Help:
         return ShowHelpAction{};
     case TitleBarHitZone::Search:
@@ -96,6 +98,10 @@ std::optional<AppBinding> HandleKeyDown(const KeyDownEvent& event)
         case 'A':
             return SelectAllAction{};
         case 'O':
+            // 最近開いたファイルの一覧。Ctrl+O はファイルを開くダイアログのまま。
+            if (event.shift) {
+                return AppCommand::ShowRecentFiles;
+            }
             return AppCommand::OpenFile;
         case 'N':
             // 押し続けるとリピートの数だけプロセスが立ち上がる。
@@ -218,6 +224,8 @@ std::wstring_view TitleBarTooltipText(TitleBarHitZone zone, bool is_maximized) n
         return {};
     case TitleBarHitZone::OpenFile:
         return ls.tooltip_open_file;
+    case TitleBarHitZone::RecentFiles:
+        return ls.tooltip_recent_files;
     case TitleBarHitZone::Help:
         return ls.tooltip_help;
     case TitleBarHitZone::Settings:

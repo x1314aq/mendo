@@ -341,6 +341,8 @@ enum class AppCommand : uint8_t {
     CopyFormatted,
     // 検索の入力欄の中の全選択。
     SearchSelectAll,
+    // 最近開いたファイルの一覧を出す。タイトルバーのボタンと Ctrl+Shift+O。
+    ShowRecentFiles,
 };
 
 // キーやボタンに割り当てたもの。
