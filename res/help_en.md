@@ -6,6 +6,7 @@ A lightweight, high-speed Markdown viewer.
 
 - Drag & drop a file onto the window
 - Press `Ctrl+O` or click the open file button in the title bar to open a file dialog
+- Press `Ctrl+Shift+O` or click the recent files button in the title bar to reopen a recently opened file
 - Click a file in the left file pane
 - Press `Ctrl+N` or choose "New Window" from the right-click menu to open the current file in a new window
 - Middle-click or `Ctrl+click` an item in the file pane, or choose "Open in New Window" from its right-click menu, to open it in a new window
@@ -41,6 +42,7 @@ A lightweight, high-speed Markdown viewer.
 | Key | Action |
 |---|---|
 | `Ctrl+O` | Open file |
+| `Ctrl+Shift+O` | Recent files |
 | `Ctrl+N` | Open a new window |
 | `Ctrl+C` | Copy selected text |
 | `Ctrl+Shift+C` | Copy selected text as formatted (HTML) |
@@ -75,6 +77,7 @@ A lightweight, high-speed Markdown viewer.
 - **Diagram Viewer**: Use the same top-right buttons to open a diagram in its own window. Scroll with the wheel or by dragging, and zoom with the buttons at the window's top-right. The open diagram updates when you save the file
 - **Open in Editor**: Select "Open in Editor" from the right-click menu to open the current file in your default editor
 - **Settings**: Click the gear button in the title bar to switch the display language (applied immediately) or clear the diagram cache
+- **Recent Files**: The clock button next to the open file button lists the files you opened most recently. Click one to reopen it, use the `×` on a row to drop it from the list, or clear the whole list from the button at the bottom
 - **Dark Mode**: Toggle from the title bar button or the right-click menu
 - **Per-Area Zoom**: The document, file pane, and TOC pane each have their own zoom level. You can also change it from the "Zoom" row (−, +, reset) in the right-click menu, which stays open while you adjust
 - **Pane Resizing**: Drag the pane border to resize

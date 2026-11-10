@@ -26,6 +26,7 @@ winget install tanaton.mendo
 - **Images** — Displays local PNG, JPEG, BMP, and other images.
 - **Navigation history** — Browser-style back/forward via mouse side buttons, mouse gestures, touchpad swipe, and more, with scroll position restored.
 - **Drag & Drop** — Drop a Markdown file onto the window to open it.
+- **Recent files** — Reopen a recently opened file from the title bar button or `Ctrl+Shift+O`; remove single entries or clear the list.
 - **In-file search** — Search within the file from the title bar search button or `Ctrl+F`.
 - **Customizable view** — Show/hide each pane, switch between light and dark themes, zoom in 17 steps from 0.25x to 5.00x, and more.
 - **Multilingual UI** — Shows the UI and help in Japanese, English, Simplified Chinese, Traditional Chinese, or Korean to match the Windows display language. You can also switch it from the settings button in the title bar.

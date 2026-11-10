@@ -173,6 +173,7 @@ add_library(mendo_core STATIC
     src/render/command_generator.cpp
     src/render/command_executor.cpp
     src/ui/context_menu.cpp
+    src/ui/recent_files_dialog.cpp
     src/ui/search_state.cpp
     src/ui/settings_dialog.cpp
     src/ui/titlebar.cpp
@@ -180,6 +181,7 @@ add_library(mendo_core STATIC
     src/input/hit_test_service.cpp
     src/io/file_explorer.cpp
     src/io/config_service.cpp
+    src/io/recent_files.cpp
     src/io/image_loader.cpp
     src/io/file_watcher.cpp
     src/mermaid/mermaid.cpp

@@ -10,6 +10,7 @@
 #include "context_menu.h"
 #include "chrome_layout.h"
 #include "pane_layout.h"
+#include "recent_files_dialog.h"
 #include "settings_dialog.h"
 #include "profiler.h"
 #include "resource.h"
@@ -898,6 +899,7 @@ void App::OpenDocument(Document next, LayoutCache estimated, bool follow_file_pa
     MENDO_TRACEF("OpenDocument: scroll_y={:.1f} max_scroll={:.1f}", state_.view.viewport.GetScrollY(), MdMaxScroll(state_));
 
     UpdateTitleBar();
+    RememberRecentFile();
     StartFileWatch(std::move(watch));
 }
 
@@ -1042,6 +1044,9 @@ void App::Execute(const SideEffect& effect)
         },
         [this](const effect::OpenFileDialog&) {
             OpenFileDialog();
+        },
+        [this](const effect::ShowRecentFiles&) {
+            ShowRecentFilesDialog();
         },
         [this](const effect::LaunchNewWindow& e) {
             // 元のウィンドウのタイトルバーが隠れないだけずらす。
@@ -1687,6 +1692,28 @@ void App::ShowSettingsDialog()
     },
     };
     SettingsDialog::Show(hwnd_, params);
+}
+
+void App::ShowRecentFilesDialog()
+{
+    const RecentFilesDialogParams params{
+        .env = MakePopupEnv(),
+        .files = &recent_files_,
+        .on_remove = [this](size_t index) { recent_files_.RemoveAt(index); },
+        .on_clear = [this] { recent_files_.Clear(); },
+        .on_open = [this](std::wstring_view path) { Dispatch(OpenPathAction{ std::wstring{ path } }); },
+    };
+    RecentFilesDialog::Show(hwnd_, params);
+}
+
+void App::RememberRecentFile()
+{
+    const auto& path = state_.document.doc.GetFilePath();
+    // ヘルプ・ライセンスなどの埋め込み文書は一覧に入れない。
+    if (!state_.document.doc.HasBackingFile()) {
+        return;
+    }
+    recent_files_.Add(path);
 }
 
 void App::ApplyLanguage(const i18n::Strings* chosen)
