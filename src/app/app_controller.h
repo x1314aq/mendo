@@ -25,6 +25,8 @@ std::optional<AppAction> HandleSearchEditKeyDown(const KeyDownEvent& event);
 // window_dip は窓のクライアント座標 (DIP)。
 MdPaneHitContext MakeMdPaneHitContext(const AppState& state, const PaneLayout& layout, DipPoint window_dip) noexcept;
 std::optional<LinkHit> LinkAtHit(const AppState& state, const hit_test::HitResult& hit);
+// MD ペインの点にある画像。文字の上でなければ nullopt。
+std::optional<ImageHit> ImageAtHit(const AppState& state, const hit_test::HitResult& hit);
 bool IsOverMdScrollbar(const AppState& state, const PaneLayout& layout, float dip_x, float dip_y) noexcept;
 
 // MD ペインで点が指す領域。
