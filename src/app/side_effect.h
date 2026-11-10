@@ -60,6 +60,8 @@ struct LoadFile {
 };
 struct ReloadFile {};
 struct OpenFileDialog {};
+// 最近開いたファイルの一覧のウィンドウを開く。
+struct ShowRecentFiles {};
 // path が空なら引数なしで起動する。anchor (UTF-8) は --anchor で渡す。
 struct LaunchNewWindow {
     std::wstring path;
@@ -102,6 +104,7 @@ using SideEffect = std::variant<
     effect::LoadFile,
     effect::ReloadFile,
     effect::OpenFileDialog,
+    effect::ShowRecentFiles,
     effect::LaunchNewWindow,
     effect::CancelOtherFileLoad,
     // Layout

@@ -273,6 +273,13 @@ struct PopupWindow {
             return 0;
 
         case WM_KEYDOWN:
+            // 中身がキーを使うなら先に渡す (一覧の移動・削除など)。使わなければ Esc / Enter で閉じるだけ。
+            if constexpr (requires { derived().OnKeyDown(wParam); }) {
+                if (derived().OnKeyDown(wParam)) {
+                    InvalidateRect(hwnd, nullptr, FALSE);
+                    return 0;
+                }
+            }
             // 選んだ時点で反映済みなので、Enter も閉じるだけ。
             if (wParam == VK_ESCAPE || wParam == VK_RETURN) {
                 done = true;

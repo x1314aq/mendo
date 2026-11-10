@@ -71,6 +71,8 @@ struct ZoomAction {
 
 struct ReloadFileAction {};
 struct OpenFileAction {};
+// 最近開いたファイルの一覧を出す。タイトルバーのボタンと Ctrl+Shift+O。
+struct ShowRecentFilesAction {};
 // path が空なら表示中の文書 (ヘルプならファイル一覧のフォルダ) を新しいウィンドウで開く。
 struct NewWindowAction {
     std::wstring path;
@@ -303,6 +305,7 @@ using AppAction = std::variant<
     ZoomAction,
     ReloadFileAction,
     OpenFileAction,
+    ShowRecentFilesAction,
     NewWindowAction,
     ToggleDarkModeAction,
     NavigateHistoryAction,

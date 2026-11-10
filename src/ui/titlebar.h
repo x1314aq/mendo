@@ -12,6 +12,8 @@ enum class TitleBarHitZone : uint8_t {
     Caption,
     Icon,
     OpenFile,
+    // 最近開いたファイル。開くボタンの隣に置く。
+    RecentFiles,
     Settings,
     Help,
     ThemeToggle,

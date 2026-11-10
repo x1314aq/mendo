@@ -11,6 +11,11 @@ namespace {
 // 指示付き初期化で書き忘れたフィールドは空文字になるので、全フィールドを全言語で調べる。
 constexpr std::wstring_view i18n::Strings::* kStringFields[] = {
     &i18n::Strings::tooltip_open_file,
+    &i18n::Strings::tooltip_recent_files,
+    &i18n::Strings::recent_files_title,
+    &i18n::Strings::recent_files_empty,
+    &i18n::Strings::recent_files_remove,
+    &i18n::Strings::recent_files_clear,
     &i18n::Strings::tooltip_help,
     &i18n::Strings::tooltip_theme_toggle,
     &i18n::Strings::tooltip_search,

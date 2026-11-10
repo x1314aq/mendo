@@ -11,6 +11,12 @@ namespace i18n {
 struct Strings {
     // タイトルバー tooltip
     std::wstring_view tooltip_open_file;
+    // 最近開いたファイルの一覧 (タイトルバーのボタンと Ctrl+Shift+O)。
+    std::wstring_view tooltip_recent_files;
+    std::wstring_view recent_files_title;
+    std::wstring_view recent_files_empty;
+    std::wstring_view recent_files_remove;
+    std::wstring_view recent_files_clear;
     std::wstring_view tooltip_help;
     std::wstring_view tooltip_theme_toggle;
     std::wstring_view tooltip_search;
@@ -110,6 +116,11 @@ struct Strings {
 
 inline constexpr Strings kJa = {
     .tooltip_open_file = L"ファイルを開く (Ctrl+O)",
+    .tooltip_recent_files = L"最近開いたファイル (Ctrl+Shift+O)",
+    .recent_files_title = L"最近開いたファイル",
+    .recent_files_empty = L"最近開いたファイルはありません",
+    .recent_files_remove = L"一覧から外す",
+    .recent_files_clear = L"一覧を消去",
     .tooltip_help = L"ヘルプ (F1)",
     .tooltip_theme_toggle = L"ダーク/ライトモード切替",
     .tooltip_search = L"検索 (Ctrl+F)",
@@ -175,6 +186,11 @@ inline constexpr Strings kJa = {
 
 inline constexpr Strings kEn = {
     .tooltip_open_file = L"Open File (Ctrl+O)",
+    .tooltip_recent_files = L"Recent Files (Ctrl+Shift+O)",
+    .recent_files_title = L"Recent Files",
+    .recent_files_empty = L"No recent files",
+    .recent_files_remove = L"Remove from list",
+    .recent_files_clear = L"Clear List",
     .tooltip_help = L"Help (F1)",
     .tooltip_theme_toggle = L"Toggle Dark/Light Mode",
     .tooltip_search = L"Search (Ctrl+F)",
@@ -240,6 +256,11 @@ inline constexpr Strings kEn = {
 
 inline constexpr Strings kZh = {
     .tooltip_open_file = L"打开文件 (Ctrl+O)",
+    .tooltip_recent_files = L"最近打开的文件 (Ctrl+Shift+O)",
+    .recent_files_title = L"最近打开的文件",
+    .recent_files_empty = L"暂无最近打开的文件",
+    .recent_files_remove = L"从列表中移除",
+    .recent_files_clear = L"清空列表",
     .tooltip_help = L"帮助 (F1)",
     .tooltip_theme_toggle = L"切换深色/浅色模式",
     .tooltip_search = L"搜索 (Ctrl+F)",
@@ -305,6 +326,11 @@ inline constexpr Strings kZh = {
 
 inline constexpr Strings kZhHant = {
     .tooltip_open_file = L"開啟檔案 (Ctrl+O)",
+    .tooltip_recent_files = L"最近開啟的檔案 (Ctrl+Shift+O)",
+    .recent_files_title = L"最近開啟的檔案",
+    .recent_files_empty = L"尚無最近開啟的檔案",
+    .recent_files_remove = L"從清單中移除",
+    .recent_files_clear = L"清空清單",
     .tooltip_help = L"說明 (F1)",
     .tooltip_theme_toggle = L"切換深色/淺色模式",
     .tooltip_search = L"搜尋 (Ctrl+F)",
@@ -370,6 +396,11 @@ inline constexpr Strings kZhHant = {
 
 inline constexpr Strings kKo = {
     .tooltip_open_file = L"파일 열기 (Ctrl+O)",
+    .tooltip_recent_files = L"최근 연 파일 (Ctrl+Shift+O)",
+    .recent_files_title = L"최근 연 파일",
+    .recent_files_empty = L"최근 연 파일이 없습니다",
+    .recent_files_remove = L"목록에서 제거",
+    .recent_files_clear = L"목록 지우기",
     .tooltip_help = L"도움말 (F1)",
     .tooltip_theme_toggle = L"다크/라이트 모드 전환",
     .tooltip_search = L"검색 (Ctrl+F)",

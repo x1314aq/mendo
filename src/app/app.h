@@ -11,6 +11,7 @@
 #include "mermaid.h"
 #include "mermaid_file_cache.h"
 #include "reducer.h"
+#include "recent_files.h"
 #include "document_utils.h"
 #include "dwrite_measurer.h"
 #include "render_params.h"
@@ -346,6 +347,9 @@ private:
 
     // ---- 設定 ----
     void ShowSettingsDialog();
+    void ShowRecentFilesDialog();
+    // 開いた文書を一覧の先頭へ積む (ヘルプなどの埋め込み文書は入らない)。
+    void RememberRecentFile();
     // Renderer の今の描画先を、図と画像のローダーへ渡す。
     void ShareRenderTarget();
     // 起動時、D3D の作成を待つ間に画像のフォルダを開き終えたら画像を頼む。
@@ -406,6 +410,8 @@ private:
     ImageLoader image_loader_;
     FileWatcher file_watcher_{ &scheduler_ };
     ConfigService& config_;
+    // 最近開いたファイル。起動時は空で、文書を開くたびに先頭へ積む。設定には書かない (プロセスの中だけ)。
+    RecentFiles recent_files_;
     ThemeService theme_service_;
     // 起動時の読み込み (preload) も Init より前にここで始め、通知先は LoadInitialDocument の Attach で渡す。
     AsyncLoadCoordinator load_coordinator_{ scheduler_ };

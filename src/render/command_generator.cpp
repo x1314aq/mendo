@@ -552,6 +552,7 @@ void EmitTitleBar(CmdWriter w, IDWriteTextFormat* icon_fmt, IDWriteTextFormat* t
     };
 
     gen_zone(TitleBarHitZone::OpenFile, L'');
+    gen_zone(TitleBarHitZone::RecentFiles, L'');
     gen_zone(TitleBarHitZone::Help, L'');
     gen_zone(TitleBarHitZone::Settings, L'');
     gen_zone(TitleBarHitZone::ThemeToggle, dark ? L'' : L'');

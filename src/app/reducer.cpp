@@ -1149,6 +1149,11 @@ void On(ReduceContext& c, const OpenFileAction&)
     PushEffect(c.effects, effect::OpenFileDialog{});
 }
 
+void On(ReduceContext& c, const ShowRecentFilesAction&)
+{
+    PushEffect(c.effects, effect::ShowRecentFiles{});
+}
+
 void On(ReduceContext& c, const NewWindowAction& a)
 {
     std::wstring path = a.path;

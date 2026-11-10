@@ -372,6 +372,8 @@ std::wstring session::LoadLastFilePath(const ConfigService& config)
     return path;
 }
 
+// 最近開いたファイルは設定に残さない (起動のたびに空から始める) ので、ここには保存も読み出しも無い。
+
 namespace {
 struct PaneKeys {
     PaneTarget target;
