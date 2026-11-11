@@ -114,6 +114,10 @@ public:
     {
         ++log_.device_changes;
     }
+    bool LoadImage(const std::wstring&) override
+    {
+        return false;
+    }
 
 private:
     ViewerLog& log_;
