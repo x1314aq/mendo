@@ -29,7 +29,8 @@ std::optional<float> NextZoom(float zoom, float fit_zoom, int dir) noexcept;
 D2D1_SIZE_F ImageDipSize(UINT pixel_width, UINT pixel_height, float dpi_scale) noexcept;
 
 struct DecodedImage {
-    // image source に渡す列。縮小が要るなら scaler を挟んである。bytes を参照するので生かしておくこと。
+    // image source に渡す列。縮小が要るなら scaler を挟んであり、アルファ無しのフレームでは
+    // その外側に形式変換が載る。bytes を参照するので生かしておくこと。
     Microsoft::WRL::ComPtr<IWICBitmapSource> source;
     // 原寸 (px)。表示の DIP は DPI で変わるので ImageDipSize で求める。
     UINT pixel_width = 0;
@@ -208,6 +209,7 @@ private:
     WindowSwapTarget target_;
     Microsoft::WRL::ComPtr<ID2D1SolidColorBrush> brush_;
     // 図を記録する DeviceContext と記録したもの。描画先と同じデバイスから作り、描画先を作り直したら捨てる。
+    // 画像だけを見ている窓では使わないので、最初に図を記録するときに作る。
     Microsoft::WRL::ComPtr<ID2D1DeviceContext5> record_dc_;
     Microsoft::WRL::ComPtr<ID2D1CommandList> commands_;
     Microsoft::WRL::ComPtr<IDWriteTextFormat> fmt_label_;
