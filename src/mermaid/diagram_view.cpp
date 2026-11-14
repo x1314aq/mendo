@@ -147,6 +147,20 @@ std::optional<diagram_view::DecodedImage> diagram_view::DecodeImage(IWICImagingF
     }
     // 縮小できなければ失敗扱いにする。原寸へ倒すとサイズ上限を素通りしてメモリが跳ねる。
     Microsoft::WRL::ComPtr<IWICBitmapScaler> scaler;
+    // アルファを持たないフレーム (JPEG 等) は形式変換より先に縮める。デコーダ側の縮小デコード
+    // (IWICBitmapSourceTransform) が効き、原寸の PBGRA に広げてから縮めずに済む。
+    if (decoded->opaque_frame) {
+        if (FAILED(wic->CreateBitmapScaler(&scaler)) ||
+            FAILED(scaler->Initialize(decoded->opaque_frame.Get(), target.width, target.height, WICBitmapInterpolationModeFant))) {
+            return std::nullopt;
+        }
+        auto converted = wic_util::ConvertBitmapSource(wic, scaler.Get());
+        if (!converted) {
+            return std::nullopt;
+        }
+        return DecodedImage{ std::move(converted), decoded->pixel_width, decoded->pixel_height };
+    }
+    // アルファ付きは straight alpha のまま縮めると縁がにじむので、変換してから縮める。
     if (FAILED(wic->CreateBitmapScaler(&scaler)) ||
         FAILED(scaler->Initialize(decoded->converter.Get(), target.width, target.height, WICBitmapInterpolationModeFant))) {
         return std::nullopt;
@@ -447,7 +461,6 @@ bool DiagramView::EnsureTarget()
         ReleaseTarget();
         return false;
     }
-    record_dc_ = CreateRecordContext(target_.dc());
     return true;
 }
 
@@ -496,6 +509,11 @@ void DiagramView::Paint()
     const Palette palette = PaletteFor(dark_);
     HRESULT image_result = S_OK;
     ID2D1ImageSourceFromWic* const image = !drawing_ && !image_bytes_.empty() ? ImageSource() : nullptr;
+    // 画像だけを見ている窓では要らないので、図を記録するときに作る。BeginDraw の外で作る
+    // (記録する DeviceContext を、描画先が BeginDraw 中に作らない)。
+    if (drawing_ && !commands_ && !record_dc_) {
+        record_dc_ = CreateRecordContext(rt);
+    }
     rt->BeginDraw();
     rt->SetTransform(D2D1::Matrix3x2F::Identity());
     rt->Clear(palette.background);

@@ -52,10 +52,18 @@ display size regardless of the image's embedded DPI.
 - Decode through the same WIC format allowlist as document images; PNG is the target.
 - Caps: 256 MB file (same as `ImageLoader::MAX_IMAGE_FILE_SIZE`), and a long edge of 8192 px
   via `IWICBitmapScaler`. Nothing is drawn from a partially decoded file.
+- Downscaling happens before the PBGRA conversion for frames that carry no alpha (JPEG and
+  friends), so the decoder's own scaled decode (`IWICBitmapSourceTransform`) is used and the
+  full-resolution surface is never materialized. Alpha frames scale after conversion, since
+  interpolating straight alpha bleeds the edges. This mirrors `wic_util::DecodeToWicBitmap`.
 - The image source uses `CACHE_ON_DEMAND`. Creation also calls `EnsureCached(nullptr)`
-  to validate all pixels and GPU uploads before accepting an image. This intentionally
-  populates the entire capped image cache initially; it does not promise GPU memory use
-  proportional to the visible region.
+  to settle the cache before accepting an image. This catches structural damage (a file
+  truncated before or inside the pixel data, so the decoder cannot produce a frame at
+  all) and populates the entire capped image cache up front — it does not promise GPU
+  memory proportional to the visible region. It does **not** validate pixel contents:
+  WIC's PNG/JPEG decoders accept e.g. a corrupted-but-CRC-consistent `IDAT` and return
+  all-zero pixels with `S_OK`, and D2D cannot see through to that, so such an image still
+  shows as blank rather than raising the failure path.
 - After a device loss, a temporary WIC source chain and a new D2D image source are created
   from the retained compressed bytes. Original pixel dimensions are retained even when
   decoding downsizes. Recovery does not reopen the file or reuse a retained WIC fallback.
@@ -112,10 +120,13 @@ shows both a diagram and a PNG.
   image natural size = pixels ÷ DPI scale;
   long-edge / file-size caps;
   rejecting network and device paths;
-  pixel ownership after closing the source file, and PNG transparency after scaling.
+  pixel ownership after closing the source file, and PNG transparency after scaling;
+  the opaque-frame scaler landing inside the format converter, and alpha frames scaling
+  after it.
 - D2D integration tests use a WARP device without an HWND. They cover drawing with high
   quality cubic interpolation after releasing application WIC references, recreating the
-  image source on a new device from the snapshot, and rejecting damaged PNG pixels even
-  when the image header is valid.
+  image source on a new device from the snapshot, and rejecting a truncated file whose
+  dimensions are still readable. Pixel-level corruption is not testable: WIC reports
+  success there, so no case pins that down.
 - `tests/test_app_controller.cpp` covers image hit testing and linked-image targets.
 - The window itself stays untested, as today (no HWND in tests).

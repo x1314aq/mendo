@@ -7,6 +7,8 @@
 #include <array>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <vector>
 
 // ---- DiagramView の倍率 ----
@@ -89,32 +91,68 @@ protected:
         ASSERT_NE(wic_, nullptr);
     }
 
-    bool WritePng(const std::filesystem::path& path, UINT width, UINT height)
+    // container で書く。opaque なら 24bppBGR (JPEG などアルファを持てない形式)、そうでなければ 32bppBGRA。
+    bool WriteImage(const std::filesystem::path& path, const GUID& container, UINT width, UINT height, bool opaque)
     {
         Microsoft::WRL::ComPtr<IWICStream> stream;
         Microsoft::WRL::ComPtr<IWICBitmapEncoder> encoder;
         Microsoft::WRL::ComPtr<IWICBitmapFrameEncode> frame;
-        WICPixelFormatGUID format = GUID_WICPixelFormat32bppBGRA;
+        WICPixelFormatGUID format = opaque ? GUID_WICPixelFormat24bppBGR : GUID_WICPixelFormat32bppBGRA;
         if (FAILED(wic_->CreateStream(&stream)) ||
             FAILED(stream->InitializeFromFilename(path.c_str(), GENERIC_WRITE)) ||
-            FAILED(wic_->CreateEncoder(GUID_ContainerFormatPng, nullptr, &encoder)) ||
+            FAILED(wic_->CreateEncoder(container, nullptr, &encoder)) ||
             FAILED(encoder->Initialize(stream.Get(), WICBitmapEncoderNoCache)) ||
             FAILED(encoder->CreateNewFrame(&frame, nullptr)) ||
             FAILED(frame->Initialize(nullptr)) || FAILED(frame->SetSize(width, height)) || FAILED(frame->SetResolution(96.0, 96.0)) ||
-            FAILED(frame->SetPixelFormat(&format)) || format != GUID_WICPixelFormat32bppBGRA) {
+            FAILED(frame->SetPixelFormat(&format)) || format != (opaque ? GUID_WICPixelFormat24bppBGR : GUID_WICPixelFormat32bppBGRA)) {
             return false;
         }
-        std::vector<BYTE> row(width * 4);
+        const UINT bpp = opaque ? 3u : 4u;
+        std::vector<BYTE> row(width * bpp);
         for (UINT x = 0; x < width; ++x) {
-            row[x * 4 + 2] = 255;
-            row[x * 4 + 3] = 128;
+            row[x * bpp + 2] = 255;
+            if (!opaque) {
+                row[x * bpp + 3] = 128;
+            }
         }
         for (UINT y = 0; y < height; ++y) {
-            if (FAILED(frame->WritePixels(1, width * 4, width * 4, row.data()))) {
+            if (FAILED(frame->WritePixels(1, width * bpp, width * bpp, row.data()))) {
                 return false;
             }
         }
         return SUCCEEDED(frame->Commit()) && SUCCEEDED(encoder->Commit());
+    }
+
+    bool WritePng(const std::filesystem::path& path, UINT width, UINT height)
+    {
+        return WriteImage(path, GUID_ContainerFormatPng, width, height, false);
+    }
+
+    static std::vector<BYTE> ReadFileBytes(const std::filesystem::path& path)
+    {
+        std::ifstream f(path, std::ios::binary);
+        return { std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>() };
+    }
+
+    static bool WriteFileBytes(const std::filesystem::path& path, std::span<const BYTE> bytes)
+    {
+        std::ofstream f(path, std::ios::binary | std::ios::trunc);
+        f.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+        return f.good();
+    }
+
+    // PNG の最初の type のチャンクの先頭位置。無ければ SIZE_MAX。
+    static size_t FindChunk(std::span<const BYTE> bytes, std::string_view type)
+    {
+        for (size_t offset = 8; offset + 12 <= bytes.size();) {
+            const uint32_t length = (static_cast<uint32_t>(bytes[offset]) << 24) | (static_cast<uint32_t>(bytes[offset + 1]) << 16) |
+                                    (static_cast<uint32_t>(bytes[offset + 2]) << 8) | bytes[offset + 3];
+            if (std::memcmp(bytes.data() + offset + 4, type.data(), type.size()) == 0) {
+                return offset;
+            }
+            offset += static_cast<size_t>(length) + 12;
+        }
+        return SIZE_MAX;
     }
 
     ScopedTempDir temp_;
@@ -293,44 +331,75 @@ TEST_F(DiagramViewImageSourceTest, RebuildsOnNewDeviceFromSnapshotAfterFileRemov
     }
 }
 
-TEST_F(DiagramViewImageSourceTest, RejectsDamagedPixelsWithValidImageHeader)
+// 途中で切れたファイルは、ヘッダ (寸法) が読めても画素を読めないので受け付けない。
+// PNG は IDAT の手前、JPEG は走査データの途中で切る。
+TEST_F(DiagramViewImageSourceTest, RejectsTruncatedImageFile)
 {
-    const auto path = temp_.path() / L"damaged.png";
-    ASSERT_TRUE(WritePng(path, 2, 1));
-    auto loaded = diagram_view::LoadImageFile(wic_.Get(), path.wstring(), 8192, 16384);
-    ASSERT_TRUE(loaded);
-    loaded->image.source.Reset();
-    auto* const bytes = loaded->bytes.data();
-    bool damaged = false;
-    for (size_t offset = 8; offset + 12 <= loaded->bytes.size();) {
-        const uint32_t length = (static_cast<uint32_t>(bytes[offset]) << 24) | (static_cast<uint32_t>(bytes[offset + 1]) << 16) |
-                                (static_cast<uint32_t>(bytes[offset + 2]) << 8) | bytes[offset + 3];
-        ASSERT_LE(length, loaded->bytes.size() - offset - 12);
-        if (std::memcmp(bytes + offset + 4, "IDAT", 4) == 0 && length > 0) {
-            // zlib のヘッダだけを壊し、PNG のチャンク CRC は整合させる。
-            bytes[offset + 8] = 0;
-            uint32_t crc = 0xFFFFFFFFu;
-            for (size_t i = offset + 4; i < offset + 8 + length; ++i) {
-                crc ^= bytes[i];
-                for (int bit = 0; bit < 8; ++bit) {
-                    crc = (crc >> 1) ^ ((crc & 1u) ? 0xEDB88320u : 0u);
-                }
-            }
-            crc = ~crc;
-            for (size_t i = 0; i < 4; ++i) {
-                bytes[offset + 8 + length + i] = static_cast<BYTE>(crc >> (24 - i * 8));
-            }
-            damaged = true;
-            break;
-        }
-        offset += static_cast<size_t>(length) + 12;
-    }
-    ASSERT_TRUE(damaged);
-    auto decoded = diagram_view::DecodeImage(wic_.Get(), std::as_const(loaded->bytes), 8192, 16384);
-    ASSERT_TRUE(decoded);
-    EXPECT_EQ(decoded->pixel_width, 2u);
-    EXPECT_EQ(decoded->pixel_height, 1u);
-    Microsoft::WRL::ComPtr<ID2D1DeviceContext2> dc;
-    ASSERT_HRESULT_SUCCEEDED(CreateContext(dc));
-    EXPECT_EQ(diagram_view::CreateImageSource(dc.Get(), decoded->source.Get()), nullptr);
+    // 切る前は読める。切った後だけが読めないことを、同じ名前で確かめる。
+    const auto png = temp_.path() / L"cut.png";
+    ASSERT_TRUE(WritePng(png, 64, 64));
+    ASSERT_TRUE(diagram_view::LoadImageFile(wic_.Get(), png.wstring(), 8192, 16384));
+    std::vector<BYTE> png_bytes = ReadFileBytes(png);
+    ASSERT_FALSE(png_bytes.empty());
+    const size_t idat = FindChunk(png_bytes, "IDAT");
+    ASSERT_NE(idat, SIZE_MAX);
+    png_bytes.resize(idat);
+    ASSERT_TRUE(WriteFileBytes(png, png_bytes));
+    EXPECT_FALSE(diagram_view::LoadImageFile(wic_.Get(), png.wstring(), 8192, 16384));
+
+    const auto jpeg = temp_.path() / L"cut.jpg";
+    ASSERT_TRUE(WriteImage(jpeg, GUID_ContainerFormatJpeg, 200, 200, true));
+    ASSERT_TRUE(diagram_view::LoadImageFile(wic_.Get(), jpeg.wstring(), 8192, 16384));
+    std::vector<BYTE> jpeg_bytes = ReadFileBytes(jpeg);
+    ASSERT_FALSE(jpeg_bytes.empty());
+    jpeg_bytes.resize(jpeg_bytes.size() / 4);
+    ASSERT_TRUE(WriteFileBytes(jpeg, jpeg_bytes));
+    EXPECT_FALSE(diagram_view::LoadImageFile(wic_.Get(), jpeg.wstring(), 8192, 16384));
+}
+
+// アルファを持たないフレーム (JPEG) は形式変換より先に縮める。デコーダ側の縮小デコードが効くので、
+// 原寸の PBGRA に広げてから縮めずに済む。並びが逆になると、大きな JPEG で原寸分のメモリを使う。
+TEST_F(DiagramViewImageSourceTest, ScalesOpaqueFrameBeforeConversion)
+{
+    const auto jpeg = temp_.path() / L"scale.jpg";
+    ASSERT_TRUE(WriteImage(jpeg, GUID_ContainerFormatJpeg, 200, 200, true));
+    const auto jpeg_bytes = ReadFileBytes(jpeg);
+    const auto jpeg_decoded = wic_util::DecodeImageFileFromMemory(wic_.Get(), jpeg_bytes);
+    ASSERT_TRUE(jpeg_decoded);
+    EXPECT_TRUE(jpeg_decoded->opaque_frame) << "JPEG はアルファを持たない";
+
+    const auto jpeg_scaled = diagram_view::DecodeImage(wic_.Get(), jpeg_bytes, 100, 16384);
+    ASSERT_TRUE(jpeg_scaled);
+    // 原寸は残したまま、列だけが上限まで縮む。
+    EXPECT_EQ(jpeg_scaled->pixel_width, 200u);
+    EXPECT_EQ(jpeg_scaled->pixel_height, 200u);
+    UINT width = 0;
+    UINT height = 0;
+    ASSERT_HRESULT_SUCCEEDED(jpeg_scaled->source->GetSize(&width, &height));
+    EXPECT_EQ(width, 100u);
+    EXPECT_EQ(height, 100u);
+    WICPixelFormatGUID format{};
+    ASSERT_HRESULT_SUCCEEDED(jpeg_scaled->source->GetPixelFormat(&format));
+    EXPECT_TRUE(format == GUID_WICPixelFormat32bppPBGRA);
+    // 縮小はデコーダのフレームに掛かっている。表に出る列は「縮小 → 変換」の順なので、
+    // 一番外側が形式変換になる (逆順なら外側は scaler になる)。
+    Microsoft::WRL::ComPtr<IWICFormatConverter> converter;
+    EXPECT_TRUE(SUCCEEDED(jpeg_scaled->source.As(&converter))) << "アンチエイリアスのため変換が外側に来ていない";
+    Microsoft::WRL::ComPtr<IWICBitmapScaler> scaler;
+    EXPECT_FALSE(SUCCEEDED(jpeg_scaled->source.As(&scaler))) << "変換の内側で縮小していない";
+
+    // アルファ付きは straight alpha のまま縮めると縁がにじむので、変換してから縮める。
+    const auto png = temp_.path() / L"scale.png";
+    ASSERT_TRUE(WritePng(png, 200, 200));
+    const auto png_bytes = ReadFileBytes(png);
+    const auto png_decoded = wic_util::DecodeImageFileFromMemory(wic_.Get(), png_bytes);
+    ASSERT_TRUE(png_decoded);
+    EXPECT_FALSE(png_decoded->opaque_frame);
+
+    const auto png_scaled = diagram_view::DecodeImage(wic_.Get(), png_bytes, 100, 16384);
+    ASSERT_TRUE(png_scaled);
+    Microsoft::WRL::ComPtr<IWICBitmapScaler> png_scaler;
+    EXPECT_TRUE(SUCCEEDED(png_scaled->source.As(&png_scaler))) << "変換の後に縮小していない";
+    Microsoft::WRL::ComPtr<IWICFormatConverter> png_converter;
+    EXPECT_FALSE(SUCCEEDED(png_scaled->source.As(&png_converter))) << "縮小の外側で変換していない";
 }
