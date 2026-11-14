@@ -130,30 +130,76 @@ int diagram_view::WheelZoom::Accumulate(int delta) noexcept
     return steps;
 }
 
-std::optional<diagram_view::DecodedImage> diagram_view::DecodeImage(IWICImagingFactory* wic, const std::wstring& path, UINT max_bitmap_dim)
+std::optional<diagram_view::DecodedImage> diagram_view::DecodeImage(IWICImagingFactory* wic, std::span<const uint8_t> bytes, UINT max_edge, UINT max_bitmap_dim)
 {
-    if (!wic || path.empty() || !path_util::IsLocalPath(path)) {
+    if (!wic || bytes.empty()) {
         return std::nullopt;
     }
-    const auto bytes = ReadAllBytes(path.c_str(), nullptr, path_util::kFileShareRWDelete, kMaxImageFileSize);
     const auto decoded = wic_util::DecodeImageFileFromMemory(wic, bytes);
     if (!decoded || decoded->pixel_width == 0 || decoded->pixel_height == 0) {
         return std::nullopt;
     }
-    const UINT max_dim = max_bitmap_dim ? std::min(max_bitmap_dim, kMaxImageLongEdge) : kMaxImageLongEdge;
+    // プレビューで許す長辺と GPU の最大辺の、小さい方まで縮める。
+    const UINT max_dim = max_bitmap_dim != 0 ? std::min(max_edge, max_bitmap_dim) : max_edge;
     const auto target = wic_util::ComputeDecodeSize(decoded->pixel_width, decoded->pixel_height, 0, max_dim);
-    auto bitmap = wic_util::DecodeToWicBitmap(wic, *decoded, target);
-    if (!bitmap) {
+    if (target == wic_util::PixelSize{ decoded->pixel_width, decoded->pixel_height }) {
+        return DecodedImage{ decoded->converter, decoded->pixel_width, decoded->pixel_height };
+    }
+    // 縮小できなければ失敗扱いにする。原寸へ倒すとサイズ上限を素通りしてメモリが跳ねる。
+    Microsoft::WRL::ComPtr<IWICBitmapScaler> scaler;
+    if (FAILED(wic->CreateBitmapScaler(&scaler)) ||
+        FAILED(scaler->Initialize(decoded->converter.Get(), target.width, target.height, WICBitmapInterpolationModeFant))) {
         return std::nullopt;
     }
-    return DecodedImage{ std::move(bitmap), decoded->pixel_width, decoded->pixel_height };
+    return DecodedImage{ std::move(scaler), decoded->pixel_width, decoded->pixel_height };
 }
-DiagramView::DiagramView(ID3D11Device* d3d, ID2D1Device* device, IDWriteFactory* dw, IWICImagingFactory* wic, std::move_only_function<void()> on_close)
-    : on_close_(std::move(on_close)), dw_(dw), wic_(wic), d3d_(d3d), device_(device)
+
+std::optional<diagram_view::LoadedImage> diagram_view::LoadImageFile(IWICImagingFactory* wic, const std::wstring& path, UINT max_edge, UINT max_bitmap_dim)
+{
+    if (!wic || path.empty() || !path_util::IsLocalPath(path)) {
+        return std::nullopt;
+    }
+    ByteBuffer bytes = ReadAllBytes(path.c_str(), nullptr, path_util::kFileShareRWDelete, kMaxImageFileSize);
+    if (bytes.empty()) {
+        return std::nullopt;
+    }
+    auto image = DecodeImage(wic, std::as_const(bytes), max_edge, max_bitmap_dim);
+    if (!image) {
+        return std::nullopt;
+    }
+    return LoadedImage{ std::move(bytes), std::move(*image) };
+}
+
+ComPtr<ID2D1ImageSourceFromWic> diagram_view::CreateImageSource(ID2D1DeviceContext* dc, IWICBitmapSource* source)
+{
+    if (!dc || !source) {
+        return nullptr;
+    }
+    ComPtr<ID2D1DeviceContext2> dc2;
+    HRESULT hr = dc->QueryInterface(IID_PPV_ARGS(&dc2));
+    ComPtr<ID2D1ImageSourceFromWic> image;
+    if (SUCCEEDED(hr)) {
+        hr = dc2->CreateImageSourceFromWic(source, D2D1_IMAGE_SOURCE_LOADING_OPTIONS_CACHE_ON_DEMAND,
+                                         D2D1_ALPHA_MODE_PREMULTIPLIED, &image);
+    }
+    if (SUCCEEDED(hr)) {
+        // ヘッダだけ正常な壊れた画像も、窓に渡す前に検出する。
+        hr = image->EnsureCached(nullptr);
+    }
+    if (FAILED(hr)) {
+        LogHrFailure("Image viewer: create/cache image source", hr);
+        return nullptr;
+    }
+    return image;
+}
+
+DiagramView::DiagramView(ID3D11Device* d3d, ID2D1Device* device, IDWriteFactory* dw, IWICImagingFactory* wic,
+                         std::move_only_function<void()> on_close, std::move_only_function<void()> on_failed)
+    : on_close_(std::move(on_close)), on_failed_(std::move(on_failed)), dw_(dw), wic_(wic), d3d_(d3d), device_(device)
 {}
 
 std::unique_ptr<IDiagramViewer> DiagramView::Open(HWND owner, ID3D11Device* d3d, ID2D1Device* device, IDWriteFactory* dw, IWICImagingFactory* wic,
-                                                  bool dark, std::move_only_function<void()> on_close)
+                                                bool dark, std::move_only_function<void()> on_close, std::move_only_function<void()> on_failed)
 {
     static const bool registered = RegisterWindowClass(
         kWindowClass.data(), WndProc, LoadIconW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(IDI_APP_ICON)), LoadCursorW(nullptr, IDC_ARROW));
@@ -161,7 +207,7 @@ std::unique_ptr<IDiagramViewer> DiagramView::Open(HWND owner, ID3D11Device* d3d,
     if (!registered || !d3d || !device || !GetWindowRect(owner, &owner_rect)) {
         return nullptr;
     }
-    std::unique_ptr<DiagramView> view(new DiagramView(d3d, device, dw, wic, std::move(on_close)));
+    std::unique_ptr<DiagramView> view(new DiagramView(d3d, device, dw, wic, std::move(on_close), std::move(on_failed)));
     const int owner_w = owner_rect.right - owner_rect.left;
     const int owner_h = owner_rect.bottom - owner_rect.top;
     const int w = MulDiv(owner_w, kSizePercent, 100);
@@ -262,7 +308,7 @@ LRESULT CALLBACK DiagramView::WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM
 
 void DiagramView::ApplyLanguage()
 {
-    if (!image_wic_) {
+    if (image_bytes_.empty()) {
         SetWindowTextW(hwnd_, i18n::S().viewer_title.data());
     }
     // 倍率と読み込み中は 13px、ボタンの記号は 16px。
@@ -292,8 +338,8 @@ void DiagramView::ShowLoading()
 {
     wheel_zoom_ = {};
     drawing_.reset();
-    image_wic_.Reset();
-    image_bitmap_.Reset();
+    image_source_.Reset();
+    image_bytes_ = {};
     image_pixel_width_ = 0;
     image_pixel_height_ = 0;
     commands_.Reset();
@@ -306,8 +352,8 @@ void DiagramView::SetDrawing(std::shared_ptr<const mermaid_util::DiagramDrawing>
 {
     const bool keep = drawing_ != nullptr;
     drawing_ = std::move(drawing);
-    image_wic_.Reset();
-    image_bitmap_.Reset();
+    image_source_.Reset();
+    image_bytes_ = {};
     image_pixel_width_ = 0;
     image_pixel_height_ = 0;
     SetWindowTextW(hwnd_, i18n::S().viewer_title.data());
@@ -325,38 +371,43 @@ bool DiagramView::LoadImage(const std::wstring& path)
     if (!EnsureTarget()) {
         return false;
     }
-    auto image = diagram_view::DecodeImage(wic_.Get(), path, MaxBitmapDim(target_.dc()));
-    if (!image) {
+    auto loaded = diagram_view::LoadImageFile(wic_.Get(), path, kMaxImageLongEdge, MaxBitmapDim(target_.dc()));
+    if (!loaded) {
         return false;
     }
-    ComPtr<ID2D1Bitmap> bitmap;
-    if (FAILED(target_.dc()->CreateBitmapFromWicBitmap(image->bitmap.Get(), &bitmap))) {
+    auto source = diagram_view::CreateImageSource(target_.dc(), loaded->image.source.Get());
+    if (!source) {
         return false;
     }
     drawing_.reset();
     commands_.Reset();
-    image_wic_ = std::move(image->bitmap);
-    image_bitmap_ = std::move(bitmap);
-    image_pixel_width_ = image->pixel_width;
-    image_pixel_height_ = image->pixel_height;
+    image_source_.Reset();
+    image_bytes_ = std::move(loaded->bytes);
+    image_source_ = std::move(source);
+    image_pixel_width_ = loaded->image.pixel_width;
+    image_pixel_height_ = loaded->image.pixel_height;
     SetWindowTextW(hwnd_, kImageTitle.data());
     Fit();
     return true;
 }
 
-ID2D1Bitmap* DiagramView::ImageBitmap()
+ID2D1ImageSourceFromWic* DiagramView::ImageSource()
 {
-    if (!image_wic_) {
+    if (image_source_) {
+        return image_source_.Get();
+    }
+    if (image_bytes_.empty()) {
         return nullptr;
     }
-    if (image_bitmap_) {
-        return image_bitmap_.Get();
-    }
-    if (FAILED(target_.dc()->CreateBitmapFromWicBitmap(image_wic_.Get(), &image_bitmap_)) || !image_bitmap_) {
-        image_bitmap_.Reset();
+    if (!target_.dc()) {
         return nullptr;
     }
-    return image_bitmap_.Get();
+    const auto decoded = diagram_view::DecodeImage(wic_.Get(), std::as_const(image_bytes_), kMaxImageLongEdge, MaxBitmapDim(target_.dc()));
+    if (!decoded) {
+        return nullptr;
+    }
+    image_source_ = diagram_view::CreateImageSource(target_.dc(), decoded->source.Get());
+    return image_source_.Get();
 }
 
 D2D1_SIZE_F DiagramView::ContentSize() const noexcept
@@ -364,7 +415,7 @@ D2D1_SIZE_F DiagramView::ContentSize() const noexcept
     if (drawing_) {
         return { drawing_->width, drawing_->height };
     }
-    return image_wic_ ? ImageSize() : D2D1_SIZE_F{};
+    return image_bytes_.empty() ? D2D1_SIZE_F{} : ImageSize();
 }
 
 float DiagramView::Scale() const noexcept
@@ -406,8 +457,8 @@ void DiagramView::ReleaseTarget() noexcept
     brush_.Reset();
     record_dc_.Reset();
     commands_.Reset();
-    // ビットマップは描画先をまたいで使えない。
-    image_bitmap_.Reset();
+    // image source はデバイスに属する。次の描画で image_bytes_ から作り直す。
+    image_source_.Reset();
 }
 
 void DiagramView::SetDevice(ID3D11Device* d3d, ID2D1Device* device)
@@ -435,10 +486,16 @@ void DiagramView::Paint()
     BeginPaint(hwnd_, &ps);
     EndPaint(hwnd_, &ps);
     if (!EnsureTarget()) {
+        if (!image_bytes_.empty() && d3d_ && SUCCEEDED(d3d_->GetDeviceRemovedReason())) {
+            auto on_failed = std::move(on_failed_);
+            on_failed();
+        }
         return;
     }
     ID2D1DeviceContext* const rt = target_.dc();
     const Palette palette = PaletteFor(dark_);
+    HRESULT image_result = S_OK;
+    ID2D1ImageSourceFromWic* const image = !drawing_ && !image_bytes_.empty() ? ImageSource() : nullptr;
     rt->BeginDraw();
     rt->SetTransform(D2D1::Matrix3x2F::Identity());
     rt->Clear(palette.background);
@@ -454,12 +511,26 @@ void DiagramView::Paint()
         }
         PaintBar();
     }
-    else if (ID2D1Bitmap* const image = ImageBitmap()) {
-        const D2D1_SIZE_F size = ImageSize();
-        const D2D1_POINT_2F origin = Origin();
-        rt->SetTransform(D2D1::Matrix3x2F::Scale(Zoom(), Zoom()) * D2D1::Matrix3x2F::Translation(origin.x, origin.y));
-        rt->DrawBitmap(image, D2D1::RectF(0.0f, 0.0f, size.width, size.height), 1.0f, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
-        rt->SetTransform(D2D1::Matrix3x2F::Identity());
+    else if (!image_bytes_.empty()) {
+        D2D1_RECT_F bounds{};
+        image_result = image ? rt->GetImageLocalBounds(image, &bounds) : E_FAIL;
+        if (SUCCEEDED(image_result)) {
+            const float local_w = bounds.right - bounds.left;
+            const float local_h = bounds.bottom - bounds.top;
+            const D2D1_SIZE_F display = ImageSize();
+            const D2D1_POINT_2F origin = Origin();
+            if (local_w > 0.0f && local_h > 0.0f) {
+                const float zoom = Zoom();
+                rt->SetTransform(D2D1::Matrix3x2F::Scale(display.width / local_w * zoom, display.height / local_h * zoom) *
+                                 D2D1::Matrix3x2F::Translation(origin.x - bounds.left * display.width / local_w * zoom,
+                                                               origin.y - bounds.top * display.height / local_h * zoom));
+                rt->DrawImage(image, nullptr, nullptr, D2D1_INTERPOLATION_MODE_HIGH_QUALITY_CUBIC, D2D1_COMPOSITE_MODE_SOURCE_OVER);
+                rt->SetTransform(D2D1::Matrix3x2F::Identity());
+            }
+            else {
+                image_result = E_FAIL;
+            }
+        }
         PaintBar();
     }
     else if (fmt_label_) {
@@ -469,8 +540,17 @@ void DiagramView::Paint()
                       brush_.Get());
     }
     // デバイスを失ったら捨てる。作り直しは、本体がデバイスを作り直したとき (SetDevice) に任せる。
-    if (!target_.EndDrawAndPresent()) {
+    HRESULT draw_result = S_OK;
+    if (!target_.EndDrawAndPresent(&draw_result) ||
+        (FAILED(image_result) && IsDeviceLostOnPresent(d3d_->GetDeviceRemovedReason()))) {
         ReleaseTarget();
+    }
+    else if (!image_bytes_.empty() && (FAILED(image_result) || FAILED(draw_result))) {
+        LogHrFailure("Image viewer: draw", FAILED(image_result) ? image_result : draw_result);
+        // 呼び出し先がこの窓を破棄するので、以降はメンバに触らない。
+        auto on_failed = std::move(on_failed_);
+        on_failed();
+        return;
     }
 }
 

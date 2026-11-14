@@ -2,7 +2,10 @@
 #include "diagram_view.h"
 #include "test_helpers.h"
 #include "wic_util.h"
+#include <d2d1_3.h>
+#include <d3d11.h>
 #include <array>
+#include <cstring>
 #include <filesystem>
 #include <vector>
 
@@ -97,7 +100,7 @@ protected:
             FAILED(wic_->CreateEncoder(GUID_ContainerFormatPng, nullptr, &encoder)) ||
             FAILED(encoder->Initialize(stream.Get(), WICBitmapEncoderNoCache)) ||
             FAILED(encoder->CreateNewFrame(&frame, nullptr)) ||
-            FAILED(frame->Initialize(nullptr)) || FAILED(frame->SetSize(width, height)) ||
+            FAILED(frame->Initialize(nullptr)) || FAILED(frame->SetSize(width, height)) || FAILED(frame->SetResolution(96.0, 96.0)) ||
             FAILED(frame->SetPixelFormat(&format)) || format != GUID_WICPixelFormat32bppBGRA) {
             return false;
         }
@@ -118,20 +121,29 @@ protected:
     Microsoft::WRL::ComPtr<IWICImagingFactory> wic_;
 };
 
-TEST_F(DiagramViewDecodeTest, OwnsDecodedPixelsAndPreservesTransparencyAfterFileRemoval)
+// ファイルを消しても、読んだ中身から列を作り直せる (image source を作り直すときに使う)。
+TEST_F(DiagramViewDecodeTest, LoadImageFileKeepsBytesAfterFileRemoval)
 {
     const auto path = temp_.path() / L"image.png";
     ASSERT_TRUE(WritePng(path, 2, 1));
-    const auto image = diagram_view::DecodeImage(wic_.Get(), path.wstring(), 16384);
-    ASSERT_TRUE(image);
-    EXPECT_EQ(image->pixel_width, 2u);
-    EXPECT_EQ(image->pixel_height, 1u);
+    auto loaded = diagram_view::LoadImageFile(wic_.Get(), path.wstring(), 8192, 16384);
+    ASSERT_TRUE(loaded);
+    EXPECT_EQ(loaded->image.pixel_width, 2u);
+    EXPECT_EQ(loaded->image.pixel_height, 1u);
     ASSERT_TRUE(std::filesystem::remove(path));
+    // 列はファイルではなく bytes を参照しているので、まだ画素を読める。
     std::array<BYTE, 8> pixels{};
-    ASSERT_HRESULT_SUCCEEDED(image->bitmap->CopyPixels(nullptr, 8, 8, pixels.data()));
+    ASSERT_HRESULT_SUCCEEDED(loaded->image.source->CopyPixels(nullptr, 8, 8, pixels.data()));
+    EXPECT_EQ(pixels, (std::array<BYTE, 8>{ 0, 0, 128, 128, 0, 0, 128, 128 }));
+    // 変換し直しても同じ画素になる。
+    const auto decoded = wic_util::DecodeImageFileFromMemory(wic_.Get(), std::as_const(loaded->bytes));
+    ASSERT_TRUE(decoded);
+    pixels = {};
+    ASSERT_HRESULT_SUCCEEDED(decoded->converter->CopyPixels(nullptr, 8, 8, pixels.data()));
     EXPECT_EQ(pixels, (std::array<BYTE, 8>{ 0, 0, 128, 128, 0, 0, 128, 128 }));
 }
 
+// 原寸は残したまま、列だけを上限まで縮める。
 TEST_F(DiagramViewDecodeTest, CapsDecodedResolutionWithoutChangingNaturalSize)
 {
     struct Case {
@@ -147,14 +159,22 @@ TEST_F(DiagramViewDecodeTest, CapsDecodedResolutionWithoutChangingNaturalSize)
     for (const auto& c : cases) {
         SCOPED_TRACE(c.gpu_limit);
         ASSERT_TRUE(WritePng(path, c.width, c.height));
-        const auto image = diagram_view::DecodeImage(wic_.Get(), path.wstring(), c.gpu_limit);
-        ASSERT_TRUE(image);
-        EXPECT_EQ(image->pixel_width, c.width);
-        EXPECT_EQ(image->pixel_height, c.height);
+        auto loaded = diagram_view::LoadImageFile(wic_.Get(), path.wstring(), 8192, c.gpu_limit);
+        ASSERT_TRUE(loaded);
+        EXPECT_EQ(loaded->image.pixel_width, c.width);
+        EXPECT_EQ(loaded->image.pixel_height, c.height);
         UINT width = 0, height = 0;
-        ASSERT_HRESULT_SUCCEEDED(image->bitmap->GetSize(&width, &height));
+        ASSERT_HRESULT_SUCCEEDED(loaded->image.source->GetSize(&width, &height));
         EXPECT_EQ(width, c.decoded_width);
         EXPECT_EQ(height, c.decoded_height);
+        std::vector<BYTE> pixels(static_cast<size_t>(width) * height * 4);
+        ASSERT_HRESULT_SUCCEEDED(loaded->image.source->CopyPixels(nullptr, width * 4, static_cast<UINT>(pixels.size()), pixels.data()));
+        for (size_t i = 0; i < pixels.size(); i += 4) {
+            ASSERT_EQ(pixels[i], 0);
+            ASSERT_EQ(pixels[i + 1], 0);
+            ASSERT_EQ(pixels[i + 2], 128);
+            ASSERT_EQ(pixels[i + 3], 128);
+        }
     }
 }
 
@@ -163,17 +183,154 @@ TEST_F(DiagramViewDecodeTest, RejectsOversizeMissingAndInvalidFiles)
     const auto path = temp_.path() / L"large-file.png";
     ASSERT_TRUE(WritePng(path, 2, 1));
     std::filesystem::resize_file(path, 256ull * 1024 * 1024 + 1);
-    EXPECT_FALSE(diagram_view::DecodeImage(wic_.Get(), path.wstring(), 16384));
-    EXPECT_FALSE(diagram_view::DecodeImage(wic_.Get(), (temp_.path() / L"missing.png").wstring(), 16384));
+    EXPECT_FALSE(diagram_view::LoadImageFile(wic_.Get(), path.wstring(), 8192, 16384));
+    EXPECT_FALSE(diagram_view::LoadImageFile(wic_.Get(), (temp_.path() / L"missing.png").wstring(), 8192, 16384));
     const auto corrupt = temp_.Write(L"corrupt.png", std::string_view("\x89PNG\r\n\x1a\n", 8));
-    EXPECT_FALSE(diagram_view::DecodeImage(wic_.Get(), corrupt.wstring(), 16384));
+    EXPECT_FALSE(diagram_view::LoadImageFile(wic_.Get(), corrupt.wstring(), 8192, 16384));
     const auto invalid = temp_.Write(L"text.png", "not an image");
-    EXPECT_FALSE(diagram_view::DecodeImage(wic_.Get(), invalid.wstring(), 16384));
+    EXPECT_FALSE(diagram_view::LoadImageFile(wic_.Get(), invalid.wstring(), 8192, 16384));
 }
 
 TEST_F(DiagramViewDecodeTest, RejectsNetworkAndDevicePaths)
 {
     for (const auto* path : { L"\\\\host\\share\\a.png", L"//host/share/a.png", L"\\\\?\\C:\\a.png", L"\\\\.\\pipe\\x", L"\\??\\C:\\a.png" }) {
-        EXPECT_FALSE(diagram_view::DecodeImage(wic_.Get(), path, 16384));
+        EXPECT_FALSE(diagram_view::LoadImageFile(wic_.Get(), path, 8192, 16384));
     }
+}
+
+class DiagramViewImageSourceTest : public DiagramViewDecodeTest {
+protected:
+    static HRESULT CreateContext(Microsoft::WRL::ComPtr<ID2D1DeviceContext2>& out)
+    {
+        Microsoft::WRL::ComPtr<ID3D11Device> d3d;
+        HRESULT hr = D3D11CreateDevice(nullptr, D3D_DRIVER_TYPE_WARP, nullptr, D3D11_CREATE_DEVICE_BGRA_SUPPORT, nullptr, 0,
+                                     D3D11_SDK_VERSION, &d3d, nullptr, nullptr);
+        if (FAILED(hr)) {
+            return hr;
+        }
+        Microsoft::WRL::ComPtr<IDXGIDevice> dxgi;
+        Microsoft::WRL::ComPtr<ID2D1Factory1> factory;
+        Microsoft::WRL::ComPtr<ID2D1Device> device;
+        Microsoft::WRL::ComPtr<ID2D1DeviceContext> dc;
+        if (FAILED(hr = d3d.As(&dxgi)) ||
+            FAILED(hr = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, factory.GetAddressOf())) ||
+            FAILED(hr = factory->CreateDevice(dxgi.Get(), &device)) ||
+            FAILED(hr = device->CreateDeviceContext(D2D1_DEVICE_CONTEXT_OPTIONS_NONE, &dc))) {
+            return hr;
+        }
+        return dc.As(&out);
+    }
+
+    static HRESULT DrawPixels(ID2D1DeviceContext* dc, ID2D1Image* image, std::array<BYTE, 8>& pixels)
+    {
+        const auto format = D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED);
+        const auto target_props = D2D1::BitmapProperties1(D2D1_BITMAP_OPTIONS_TARGET, format, 96.0f, 96.0f);
+        const auto read_props = D2D1::BitmapProperties1(D2D1_BITMAP_OPTIONS_CPU_READ | D2D1_BITMAP_OPTIONS_CANNOT_DRAW, format, 96.0f, 96.0f);
+        Microsoft::WRL::ComPtr<ID2D1Bitmap1> target;
+        Microsoft::WRL::ComPtr<ID2D1Bitmap1> readback;
+        HRESULT hr = dc->CreateBitmap(D2D1::SizeU(2, 1), nullptr, 0, target_props, &target);
+        if (FAILED(hr)) {
+            return hr;
+        }
+        dc->SetTarget(target.Get());
+        dc->BeginDraw();
+        dc->Clear(D2D1::ColorF(0, 0.0f));
+        dc->DrawImage(image, nullptr, nullptr, D2D1_INTERPOLATION_MODE_HIGH_QUALITY_CUBIC);
+        hr = dc->EndDraw();
+        dc->SetTarget(nullptr);
+        if (FAILED(hr) || FAILED(hr = dc->CreateBitmap(D2D1::SizeU(2, 1), nullptr, 0, read_props, &readback)) ||
+            FAILED(hr = readback->CopyFromBitmap(nullptr, target.Get(), nullptr))) {
+            return hr;
+        }
+        D2D1_MAPPED_RECT mapped{};
+        if (FAILED(hr = readback->Map(D2D1_MAP_OPTIONS_READ, &mapped))) {
+            return hr;
+        }
+        std::memcpy(pixels.data(), mapped.bits, pixels.size());
+        return readback->Unmap();
+    }
+};
+
+TEST_F(DiagramViewImageSourceTest, DrawsAfterReleasingApplicationWicReference)
+{
+    const auto path = temp_.path() / L"image.png";
+    ASSERT_TRUE(WritePng(path, 2, 1));
+    auto loaded = diagram_view::LoadImageFile(wic_.Get(), path.wstring(), 8192, 16384);
+    ASSERT_TRUE(loaded);
+    Microsoft::WRL::ComPtr<ID2D1DeviceContext2> dc;
+    ASSERT_HRESULT_SUCCEEDED(CreateContext(dc));
+    auto source = diagram_view::CreateImageSource(dc.Get(), loaded->image.source.Get());
+    ASSERT_NE(source, nullptr);
+    loaded->image.source.Reset();
+    ASSERT_TRUE(std::filesystem::remove(path));
+    ASSERT_HRESULT_SUCCEEDED(source->TrimCache(nullptr));
+    std::array<BYTE, 8> pixels{};
+    ASSERT_HRESULT_SUCCEEDED(DrawPixels(dc.Get(), source.Get(), pixels));
+    EXPECT_EQ(pixels, (std::array<BYTE, 8>{ 0, 0, 128, 128, 0, 0, 128, 128 }));
+}
+
+TEST_F(DiagramViewImageSourceTest, RebuildsOnNewDeviceFromSnapshotAfterFileRemoval)
+{
+    const auto path = temp_.path() / L"image.png";
+    ASSERT_TRUE(WritePng(path, 2, 1));
+    auto loaded = diagram_view::LoadImageFile(wic_.Get(), path.wstring(), 8192, 16384);
+    ASSERT_TRUE(loaded);
+    ByteBuffer bytes = std::move(loaded->bytes);
+    loaded.reset();
+    ASSERT_TRUE(std::filesystem::remove(path));
+    for (int generation = 0; generation < 2; ++generation) {
+        SCOPED_TRACE(generation);
+        Microsoft::WRL::ComPtr<ID2D1DeviceContext2> dc;
+        ASSERT_HRESULT_SUCCEEDED(CreateContext(dc));
+        auto decoded = diagram_view::DecodeImage(wic_.Get(), std::as_const(bytes), 8192, 16384);
+        ASSERT_TRUE(decoded);
+        auto source = diagram_view::CreateImageSource(dc.Get(), decoded->source.Get());
+        ASSERT_NE(source, nullptr);
+        decoded.reset();
+        std::array<BYTE, 8> pixels{};
+        ASSERT_HRESULT_SUCCEEDED(DrawPixels(dc.Get(), source.Get(), pixels));
+        EXPECT_EQ(pixels, (std::array<BYTE, 8>{ 0, 0, 128, 128, 0, 0, 128, 128 }));
+    }
+}
+
+TEST_F(DiagramViewImageSourceTest, RejectsDamagedPixelsWithValidImageHeader)
+{
+    const auto path = temp_.path() / L"damaged.png";
+    ASSERT_TRUE(WritePng(path, 2, 1));
+    auto loaded = diagram_view::LoadImageFile(wic_.Get(), path.wstring(), 8192, 16384);
+    ASSERT_TRUE(loaded);
+    loaded->image.source.Reset();
+    auto* const bytes = loaded->bytes.data();
+    bool damaged = false;
+    for (size_t offset = 8; offset + 12 <= loaded->bytes.size();) {
+        const uint32_t length = (static_cast<uint32_t>(bytes[offset]) << 24) | (static_cast<uint32_t>(bytes[offset + 1]) << 16) |
+                                (static_cast<uint32_t>(bytes[offset + 2]) << 8) | bytes[offset + 3];
+        ASSERT_LE(length, loaded->bytes.size() - offset - 12);
+        if (std::memcmp(bytes + offset + 4, "IDAT", 4) == 0 && length > 0) {
+            // zlib のヘッダだけを壊し、PNG のチャンク CRC は整合させる。
+            bytes[offset + 8] = 0;
+            uint32_t crc = 0xFFFFFFFFu;
+            for (size_t i = offset + 4; i < offset + 8 + length; ++i) {
+                crc ^= bytes[i];
+                for (int bit = 0; bit < 8; ++bit) {
+                    crc = (crc >> 1) ^ ((crc & 1u) ? 0xEDB88320u : 0u);
+                }
+            }
+            crc = ~crc;
+            for (size_t i = 0; i < 4; ++i) {
+                bytes[offset + 8 + length + i] = static_cast<BYTE>(crc >> (24 - i * 8));
+            }
+            damaged = true;
+            break;
+        }
+        offset += static_cast<size_t>(length) + 12;
+    }
+    ASSERT_TRUE(damaged);
+    auto decoded = diagram_view::DecodeImage(wic_.Get(), std::as_const(loaded->bytes), 8192, 16384);
+    ASSERT_TRUE(decoded);
+    EXPECT_EQ(decoded->pixel_width, 2u);
+    EXPECT_EQ(decoded->pixel_height, 1u);
+    Microsoft::WRL::ComPtr<ID2D1DeviceContext2> dc;
+    ASSERT_HRESULT_SUCCEEDED(CreateContext(dc));
+    EXPECT_EQ(diagram_view::CreateImageSource(dc.Get(), decoded->source.Get()), nullptr);
 }

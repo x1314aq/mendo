@@ -28,9 +28,10 @@ The viewer holds either a diagram or an image. `HasContent()` accepts both;
 
 - `Diagram` stays as today: recorded `ID2D1CommandList` + `DiagramDrawing` (needed to
   rebuild the command list after a device loss).
-- `Image` holds the decoded `IWICBitmapSource` and a D2D bitmap made from it on the
-  viewer's own render target (a D2D bitmap belongs to one target, so it cannot be borrowed
-  from the document's render target).
+- `Image` holds a compressed file snapshot and an `ID2D1ImageSourceFromWic` created on
+  the viewer's D2D device. WIC frames, converters and scalers are temporary application
+  references; D2D retains the source chain for its cache. No CPU bitmap or separate WIC
+  fallback is retained by the viewer. The image source is released before its snapshot.
 
 Everything that is not "how pixels are produced" is shared: title, rounded bar, ± / fit
 buttons, zoom label, scrollbars, drag-to-pan, arrow/page/home/end keys, `Esc`, DPI change,
@@ -40,8 +41,10 @@ device-loss recovery. Layout, scrolling and the fit zoom only need a natural siz
 - image → pixel size ÷ DPI scale, i.e. the same DIP size the document draws it at, so 100%
   in the viewer matches 100% in the page.
 
-`Origin()`, `ScrollTo()`, `UpdateScrollBars()`, `Layout()` and `NextZoom`/`FitZoom` switch
-from `drawing_` to `ContentSize()`; `Paint()` uses the corresponding content source.
+`Origin()`, `ScrollTo()`, `UpdateScrollBars()`, `Layout()` and `NextZoom`/`FitZoom` use
+`ContentSize()`. Images are drawn with `DrawImage` and
+`D2D1_INTERPOLATION_MODE_HIGH_QUALITY_CUBIC`; the local bounds are mapped to the same
+display size regardless of the image's embedded DPI.
 
 ### Decoding rules
 - Local files only — `path_util`/`ResolveLocalPath` already reject UNC and device paths
@@ -49,13 +52,15 @@ from `drawing_` to `ContentSize()`; `Paint()` uses the corresponding content sou
 - Decode through the same WIC format allowlist as document images; PNG is the target.
 - Caps: 256 MB file (same as `ImageLoader::MAX_IMAGE_FILE_SIZE`), and a long edge of 8192 px
   via `IWICBitmapScaler`. Nothing is drawn from a partially decoded file.
-- The D2D bitmap is created when opening the image, so GPU upload failures also close the
-  viewer and raise the failure toast. After `D2DERR_RECREATE_TARGET`, it is rebuilt from the
-  retained WIC bitmap. Original pixel dimensions are retained even when decoding downsizes.
-- The decode itself runs on the UI thread once, when the preview is opened. It is a single
-  user-initiated action with file-size and output-resolution caps. If it shows up as a stall, the
-  same entry point can move to the existing background scheduler without touching anything
-  else in this design.
+- The image source uses `CACHE_ON_DEMAND`. Creation also calls `EnsureCached(nullptr)`
+  to validate all pixels and GPU uploads before accepting an image. This intentionally
+  populates the entire capped image cache initially; it does not promise GPU memory use
+  proportional to the visible region.
+- After a device loss, a temporary WIC source chain and a new D2D image source are created
+  from the retained compressed bytes. Original pixel dimensions are retained even when
+  decoding downsizes. Recovery does not reopen the file or reuse a retained WIC fallback.
+- Reading, decoding and cache initialization run on the UI thread when opening or rebuilding
+  the image. File-size and output-resolution caps bound each operation.
 
 ### Lifecycle
 - One viewer window, as today: opening an image replaces a shown diagram and vice versa
@@ -67,6 +72,8 @@ from `drawing_` to `ContentSize()`; `Paint()` uses the corresponding content sou
 - Failed decode (missing file, unsupported codec, over the cap) shows the existing error
   path: the window closes and the usual "cannot be shown" toast is raised, so a broken
   reference never leaves an empty window behind.
+- Permanent failures while rebuilding or drawing an image use the same close-and-notify
+  path. Device loss releases the device resources so the normal device recovery can retry.
 
 ### Entry point — Ctrl+click an image
 - `Ctrl+click` on an image in the document opens it in the viewer, matching the existing
@@ -105,6 +112,10 @@ shows both a diagram and a PNG.
   image natural size = pixels ÷ DPI scale;
   long-edge / file-size caps;
   rejecting network and device paths;
-  pixel ownership after closing the source file, and PNG transparency.
+  pixel ownership after closing the source file, and PNG transparency after scaling.
+- D2D integration tests use a WARP device without an HWND. They cover drawing with high
+  quality cubic interpolation after releasing application WIC references, recreating the
+  image source on a new device from the snapshot, and rejecting damaged PNG pixels even
+  when the image header is valid.
 - `tests/test_app_controller.cpp` covers image hit testing and linked-image targets.
 - The window itself stays untested, as today (no HWND in tests).

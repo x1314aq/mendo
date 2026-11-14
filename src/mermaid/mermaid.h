@@ -62,7 +62,8 @@ public:
     // 拡大表示の窓を開く。開けなければ null。本番は DiagramView::Open で、テストは窓を作らない実装を返す。
     // d3d と device は本体の描画デバイス (SetRenderTarget で受けたもの)。
     using ViewerFactory = std::unique_ptr<IDiagramViewer> (*)(HWND owner, ID3D11Device* d3d, ID2D1Device* device, IDWriteFactory* dw,
-                                                              IWICImagingFactory* wic, bool dark, std::move_only_function<void()> on_close);
+                                                              IWICImagingFactory* wic, bool dark, std::move_only_function<void()> on_close,
+                                                              std::move_only_function<void()> on_failed);
 
     // d2d・wic・dw は Renderer と共有し、保存・コピーの画像の描画先 (d2d) と画像 (wic)、図の文字 (dw) を作るのに使う。
     void Init(HWND hwnd, ID2D1Factory* d2d, IWICImagingFactory* wic, IDWriteFactory* dw, MermaidFileCache& file_cache, TaskScheduler& bg_scheduler,

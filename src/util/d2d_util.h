@@ -178,7 +178,9 @@ public:
 
     bool Create(ID3D11Device* d3d, ID2D1Device* device, HWND hwnd, UINT width, UINT height, float dpi, Mode mode);
     bool Resize(UINT width, UINT height, float dpi);
-    bool EndDrawAndPresent();
+    // EndDraw して Present する (垂直同期を待つ)。デバイスを失っていれば false (Reset して作り直す)。
+    // result があれば、デバイスロスト以外も含めた HRESULT を返す。
+    bool EndDrawAndPresent(HRESULT* result = nullptr);
     void Reset() noexcept;
     ID2D1DeviceContext* dc() const noexcept
     {
