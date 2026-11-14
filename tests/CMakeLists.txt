@@ -18,6 +18,7 @@ target_link_libraries(mendo_tests PRIVATE
     mendo_core
     mendo_test_support
     GTest::gtest_main
+    d3d11
     shlwapi
 )
 # テストの変更のたびに全体の LTCG を待たない (1 ファイルの修正で 34 → 11 秒)。

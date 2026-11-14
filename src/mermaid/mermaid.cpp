@@ -489,7 +489,8 @@ void MermaidRenderer::OpenImageViewer(std::wstring_view path, bool dark_mode)
 
 bool MermaidRenderer::OpenViewerWindow(bool dark_mode)
 {
-    viewer_.view = open_viewer_(hwnd_, d3d_device_.Get(), d2d_device_.Get(), dw_factory_.Get(), wic_factory_.Get(), dark_mode, [this] { CloseViewer(); });
+    viewer_.view = open_viewer_(hwnd_, d3d_device_.Get(), d2d_device_.Get(), dw_factory_.Get(), wic_factory_.Get(), dark_mode,
+                                [this] { CloseViewer(); }, [this] { FailViewer(); });
     if (!viewer_.view) {
         // 窓が作れなかった (開けなかった) ときだけ知らせる。図が描けないときとは別。
         viewer_ = {};

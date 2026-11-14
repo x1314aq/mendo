@@ -154,7 +154,8 @@ public:
     // バッファを放して大きさを変え、描画先にし直す。失敗すれば何も持たない。
     bool Resize(UINT width, UINT height, float dpi);
     // EndDraw して Present する (垂直同期を待つ)。デバイスを失っていれば false (Reset して作り直す)。
-    bool EndDrawAndPresent();
+    // result があれば、デバイスロスト以外も含めた HRESULT を返す。
+    bool EndDrawAndPresent(HRESULT* result = nullptr);
     void Reset() noexcept;
     // 描画先。Create の前と失敗の後は null。
     ID2D1DeviceContext* dc() const noexcept

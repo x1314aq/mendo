@@ -64,6 +64,7 @@ struct ViewerLog {
     bool alive = false;
     bool dark = false;
     bool fail_open = false;
+    std::move_only_function<void()> on_failed;
     // 本体の描画デバイスを差し替えられた回数。
     int device_changes = 0;
     std::vector<std::shared_ptr<const mermaid_util::DiagramDrawing>> drawings;
@@ -168,8 +169,9 @@ protected:
     }
 
     static std::unique_ptr<IDiagramViewer> OpenFakeViewer(HWND, ID3D11Device*, ID2D1Device*, IDWriteFactory*, IWICImagingFactory*, bool dark,
-                                                          std::move_only_function<void()>)
+                                                          std::move_only_function<void()>, std::move_only_function<void()> on_failed)
     {
+        viewer_.on_failed = std::move(on_failed);
         return viewer_.fail_open ? nullptr : std::make_unique<FakeViewer>(viewer_, dark);
     }
 
@@ -590,6 +592,22 @@ TEST_F(MermaidRendererTest, ViewerFailsWhenWindowCannotOpen)
     ASSERT_TRUE(RenderUntilSettled(beta, entry));
     EXPECT_TRUE(viewer_.drawings.empty());
     EXPECT_EQ(viewer_failed_, 1);
+}
+
+TEST_F(MermaidRendererTest, ViewerClosesAndNotifiesOnDrawingFailure)
+{
+    request_viewer_ = false;
+    OpenViewer(kAlpha, 3);
+    ASSERT_TRUE(viewer_.alive);
+    ASSERT_TRUE(viewer_.on_failed);
+
+    auto on_failed = std::move(viewer_.on_failed);
+    on_failed();
+
+    EXPECT_FALSE(viewer_.alive);
+    EXPECT_EQ(viewer_failed_, 1);
+    EXPECT_EQ(renderer_.ViewerCode(), std::nullopt);
+    EXPECT_EQ(renderer_.ViewerNode(), -1);
 }
 
 // テーマの切り替えは窓の配色を変え、読み込み中に戻さずに新しいテーマの図に差し替える。

@@ -2,6 +2,7 @@
 #include "d2d_util.h"
 #include "mermaid_util.h"
 #include "tooltip.h"
+#include "utility.h"
 #include <d2d1_1.h>
 #include <dwrite.h>
 #include <wincodec.h>
@@ -14,6 +15,7 @@
 #include <variant>
 
 struct ID2D1DeviceContext5;
+struct ID2D1ImageSourceFromWic;
 
 namespace diagram_view {
 
@@ -27,13 +29,30 @@ std::optional<float> NextZoom(float zoom, float fit_zoom, int dir) noexcept;
 D2D1_SIZE_F ImageDipSize(UINT pixel_width, UINT pixel_height, float dpi_scale) noexcept;
 
 struct DecodedImage {
-    Microsoft::WRL::ComPtr<IWICBitmap> bitmap;
+    // image source に渡す列。縮小が要るなら scaler を挟んである。bytes を参照するので生かしておくこと。
+    Microsoft::WRL::ComPtr<IWICBitmapSource> source;
+    // 原寸 (px)。表示の DIP は DPI で変わるので ImageDipSize で求める。
     UINT pixel_width = 0;
     UINT pixel_height = 0;
 };
 
-// 縮小デコードしても表示の原寸は保つ。ファイルを閉じた後も bitmap 単体で使える。
-std::optional<DecodedImage> DecodeImage(IWICImagingFactory* wic, const std::wstring& path, UINT max_bitmap_dim);
+// bytes から寸法を読み、プレビューに要る解像度まで縮めた列を作る。読めなければ nullopt。
+// 画素はここでは展開しない (image source が描くときに読む)。
+// max_edge はプレビューで許す長辺、max_bitmap_dim は GPU の最大辺 (0 は無制限)。
+std::optional<DecodedImage> DecodeImage(IWICImagingFactory* wic, std::span<const uint8_t> bytes, UINT max_edge, UINT max_bitmap_dim);
+
+struct LoadedImage {
+    // ファイルの中身。描画先を作り直したときに、ここから列を作り直す。
+    ByteBuffer bytes;
+    DecodedImage image;
+};
+
+// 画像ファイルを読んで DecodeImage する。ネットワーク上とデバイスのパスは扱わない。
+// 読めなければ nullopt。ファイルは閉じるので、bytes だけが残る。
+std::optional<LoadedImage> LoadImageFile(IWICImagingFactory* wic, const std::wstring& path, UINT max_edge, UINT max_bitmap_dim);
+
+// 全画素のデコードと転送を確定する。WIC source の参照は D2D が保持する。
+Microsoft::WRL::ComPtr<ID2D1ImageSourceFromWic> CreateImageSource(ID2D1DeviceContext* dc, IWICBitmapSource* source);
 
 // 高精度ホイールの端数を次のノッチに持ち越す。
 struct WheelZoom {
@@ -76,7 +95,7 @@ public:
     // 分の commit 約 30MB が閉じた後も残った。数式の形 (MathDrawing::Shape) はファクトリごとに作るので、本体と同じファクトリで
     // 描くと本体と交互に作り直さない。
     static std::unique_ptr<IDiagramViewer> Open(HWND owner, ID3D11Device* d3d, ID2D1Device* device, IDWriteFactory* dw, IWICImagingFactory* wic,
-                                                bool dark, std::move_only_function<void()> on_close);
+                                                bool dark, std::move_only_function<void()> on_close, std::move_only_function<void()> on_failed);
     // 窓も壊す。
     ~DiagramView() override;
     DiagramView(const DiagramView&) = delete;
@@ -91,10 +110,10 @@ public:
     {
         return drawing_ != nullptr;
     }
-    // 図か画像を出している。
+    // 画像はデバイスを失っても圧縮した中身が残る。
     bool HasContent() const noexcept
     {
-        return drawing_ != nullptr || image_wic_ != nullptr;
+        return drawing_ != nullptr || !image_bytes_.empty();
     }
     void BringToFront() const noexcept override;
     // タイトル・ボタンのツールチップ・読み込み中の文言を、表示中の言語にする。
@@ -104,7 +123,7 @@ public:
     void ShowLoading() override;
     // 図が出ていれば位置とボタンで変えた倍率を保つ (保存とテーマの切り替え)。全体表示のままなら新しい大きさに合わせ直す。
     void SetDrawing(std::shared_ptr<const mermaid_util::DiagramDrawing> drawing) override;
-    // 画像 (PNG など WIC が読める形式) を開く。UI スレッドで 1 度だけデコードする (1 回の操作で、大きさの上限で抑える)。
+    // 画像を開き、デコードと転送の成功を確認してから表示する。
     // 読めなければ false (呼び出し側が窓を閉じる)。
     bool LoadImage(const std::wstring& path) override;
     void SetDevice(ID3D11Device* d3d, ID2D1Device* device) override;
@@ -119,7 +138,8 @@ private:
         Fit
     };
 
-    DiagramView(ID3D11Device* d3d, ID2D1Device* device, IDWriteFactory* dw, IWICImagingFactory* wic, std::move_only_function<void()> on_close);
+    DiagramView(ID3D11Device* d3d, ID2D1Device* device, IDWriteFactory* dw, IWICImagingFactory* wic,
+                std::move_only_function<void()> on_close, std::move_only_function<void()> on_failed);
     static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam);
     // 扱ったメッセージは true を返し、result に戻り値を入れる。
     bool HandleMessage(UINT msg, WPARAM wparam, LPARAM lparam, LRESULT& result);
@@ -134,8 +154,8 @@ private:
     void UpdateScrollBars();
     // 中身の原寸 (DIP)。図は CSS px、画像はピクセルを DPI の倍率で割った値。中身が無ければ 0。
     D2D1_SIZE_F ContentSize() const noexcept;
-    // 画像の D2D ビットマップを描画先に載せる。描画先を作り直したら捨てるので、その都度作る。
-    ID2D1Bitmap* ImageBitmap();
+    // 画像を描く D2D の image source。初めて描くときに作る (デバイスを失ったら捨てて作り直す)。
+    ID2D1ImageSourceFromWic* ImageSource();
     // 画像の表示寸法 (DIP)。今の DPI で割るので、DPI が変わると Layout が新しい値で組み直す。
     D2D1_SIZE_F ImageSize() const noexcept
     {
@@ -180,6 +200,7 @@ private:
     // 窓を作り終えるまでと、本体と一緒に壊された後は null。
     HWND hwnd_ = nullptr;
     std::move_only_function<void()> on_close_;
+    std::move_only_function<void()> on_failed_;
     Microsoft::WRL::ComPtr<IDWriteFactory> dw_;
     Microsoft::WRL::ComPtr<IWICImagingFactory> wic_;
     Microsoft::WRL::ComPtr<ID3D11Device> d3d_;
@@ -193,9 +214,10 @@ private:
     Microsoft::WRL::ComPtr<IDWriteTextFormat> fmt_symbol_;
 
     std::shared_ptr<const mermaid_util::DiagramDrawing> drawing_;
-    // デバイスを失ってもデコードし直さずに済むよう、CPU 側の画素も残す。
-    Microsoft::WRL::ComPtr<IWICBitmapSource> image_wic_;
-    Microsoft::WRL::ComPtr<ID2D1Bitmap> image_bitmap_;
+    // D2D が参照するので source より先に宣言し、後に破棄する。
+    ByteBuffer image_bytes_;
+    // WIC の参照は D2D だけが持つ。デバイスを失ったら bytes から作り直す。
+    Microsoft::WRL::ComPtr<ID2D1ImageSourceFromWic> image_source_;
     // 画像の原寸 (px)。DIP は DPI の倍率で割って求めるので、DPI が変わっても原寸はそのまま。
     UINT image_pixel_width_ = 0;
     UINT image_pixel_height_ = 0;

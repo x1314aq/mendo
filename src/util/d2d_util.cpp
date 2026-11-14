@@ -65,11 +65,14 @@ HRESULT BindSwapChainTarget(ID2D1DeviceContext* dc, IDXGISwapChain1* swap_chain,
     return hr;
 }
 
-bool WindowSwapTarget::EndDrawAndPresent()
+bool WindowSwapTarget::EndDrawAndPresent(HRESULT* result)
 {
     HRESULT hr = dc_->EndDraw();
     if (SUCCEEDED(hr)) {
         hr = swap_chain_->Present(1, 0);
+    }
+    if (result) {
+        *result = hr;
     }
     return hr != D2DERR_RECREATE_TARGET && !IsDeviceLostOnPresent(hr);
 }
