@@ -101,6 +101,21 @@ std::optional<float> zoom_viewer::NextZoom(float zoom, float fit_zoom, int dir) 
     return it == used.begin() ? std::nullopt : std::optional{ *std::prev(it) };
 }
 
+int zoom_viewer::WheelZoom::Accumulate(int delta) noexcept
+{
+    if (delta == 0) {
+        return 0;
+    }
+    // 向きが変わったら端数を捨てる。前の向きの残りで 1 ノッチ動くのを防ぐ。
+    if ((delta > 0) != (remainder > 0)) {
+        remainder = 0;
+    }
+    remainder += delta;
+    const int steps = remainder / WHEEL_DELTA;
+    remainder -= steps * WHEEL_DELTA;
+    return steps;
+}
+
 ZoomWindow::ZoomWindow(ID3D11Device* d3d, ID2D1Device* device, IDWriteFactory* dw, IWICImagingFactory* wic, std::move_only_function<void()> on_close)
     : on_close_(std::move(on_close)), dw_(dw), wic_(wic), d3d_(d3d), device_(device)
 {}
@@ -660,18 +675,41 @@ void ZoomWindow::Scroll(int bar, WORD request)
 
 void ZoomWindow::SetZoom(float zoom)
 {
+    SetZoomAt(zoom, { view_width_ / 2.0f, view_height_ / 2.0f });
+}
+
+void ZoomWindow::SetZoomAt(float zoom, D2D1_POINT_2F anchor)
+{
     const D2D1_POINT_2F before = Origin();
-    // 窓の中央にある中身の上の点 (倍率 1 の座標)。
-    const float ax = (view_width_ / 2.0f - before.x) / Zoom();
-    const float ay = (view_height_ / 2.0f - before.y) / Zoom();
+    // anchor の下にある中身の上の点 (倍率 1 の座標)。
+    const float ax = (anchor.x - before.x) / Zoom();
+    const float ay = (anchor.y - before.y) / Zoom();
     manual_zoom_ = zoom;
     Layout();
-    // 新しい倍率で同じ点が中央に来るスクロール位置。余白込みの面では中身の左上が kPadding にある。
-    ScrollTo(kPadding + ax * zoom - view_width_ / 2.0f, kPadding + ay * zoom - view_height_ / 2.0f);
+    // 新しい倍率でも同じ点が anchor に来るスクロール位置。余白込みの面では中身の左上が kPadding にある。
+    ScrollTo(kPadding + ax * zoom - anchor.x, kPadding + ay * zoom - anchor.y);
+}
+
+void ZoomWindow::ZoomByWheel(int delta, D2D1_POINT_2F anchor)
+{
+    if (!HasContent()) {
+        return;
+    }
+    const int steps = wheel_zoom_.Accumulate(delta);
+    // 1 ノッチずつ止まる位置へ動かす。端ではそれ以上動かない。
+    const int dir = steps > 0 ? 1 : -1;
+    for (int i = 0; i < std::abs(steps); ++i) {
+        const auto next = zoom_viewer::NextZoom(Zoom(), fit_zoom_, dir);
+        if (!next) {
+            break;
+        }
+        SetZoomAt(*next, anchor);
+    }
 }
 
 void ZoomWindow::Fit()
 {
+    wheel_zoom_ = {};
     manual_zoom_.reset();
     scroll_x_ = 0.0f;
     scroll_y_ = 0.0f;
@@ -680,6 +718,8 @@ void ZoomWindow::Fit()
 
 void ZoomWindow::Step(int dir)
 {
+    // キーやボタンで倍率を変えたら、ホイールの端数は捨てて 1 ノッチから数え直す。
+    wheel_zoom_ = {};
     if (const auto next = HasContent() ? zoom_viewer::NextZoom(Zoom(), fit_zoom_, dir) : std::nullopt) {
         SetZoom(*next);
     }
@@ -763,9 +803,17 @@ bool ZoomWindow::HandleMessage(UINT msg, WPARAM wparam, LPARAM lparam, LRESULT& 
 
     case WM_MOUSEWHEEL:
     case WM_MOUSEHWHEEL: {
-        // ホイールはスクロール (GitHub と同じ)。Shift で横。倍率はボタンとキーで変える。
+        // Ctrl を押したホイールは倍率 (ポインタの下を動かさない)。押していなければスクロール (GitHub と同じ) で、Shift は横。
+        const int raw_delta = GET_WHEEL_DELTA_WPARAM(wparam);
+        if (msg == WM_MOUSEWHEEL && (GET_KEYSTATE_WPARAM(wparam) & MK_CONTROL)) {
+            POINT pt{ GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam) };
+            ScreenToClient(hwnd_, &pt);
+            ZoomByWheel(raw_delta, ToDip(MAKELPARAM(pt.x, pt.y)));
+            return true;
+        }
+        wheel_zoom_ = {};
         const UINT lines = WheelScrollLines();
-        const float notches = static_cast<float>(GET_WHEEL_DELTA_WPARAM(wparam)) / WHEEL_DELTA;
+        const float notches = static_cast<float>(raw_delta) / WHEEL_DELTA;
         const bool horizontal = msg == WM_MOUSEHWHEEL || (GET_KEYSTATE_WPARAM(wparam) & MK_SHIFT);
         // 1 行を矢印キーの 1 回分として SPI_GETWHEELSCROLLLINES 行 (本文のホイールの量とは違う)。
         const float step = lines == WHEEL_PAGESCROLL ? (horizontal ? view_width_ : view_height_) * SCROLL_PAGE_FACTOR : KEY_SCROLL_LINE_AMOUNT * static_cast<float>(lines);

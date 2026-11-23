@@ -30,7 +30,6 @@ Versions up to v0.5.1.0 stored settings and diagram caches in the `%LOCALAPPDATA
 - **Images** — Displays local PNG, JPEG, BMP, and other images.
 - **Navigation history** — Browser-style back/forward via mouse side buttons, mouse gestures, touchpad swipe, and more, with scroll position restored.
 - **Drag & Drop** — Drop a Markdown file onto the window to open it.
-- **Recent files** — Reopen a recently opened file from the title bar button or `Ctrl+Shift+O`; remove single entries or clear the list.
 - **In-file search** — Search within the file from the title bar search button or `Ctrl+F`.
 - **Customizable view** — Show/hide each pane, switch between light and dark themes, zoom in 17 steps from 0.25x to 5.00x, and more.
 - **Multilingual UI** — Shows the UI and help in Japanese, English, Simplified Chinese, Traditional Chinese, or Korean to match the Windows display language. You can also switch it from the settings button in the title bar.
@@ -60,7 +59,7 @@ Type `mendo` into the File Explorer address bar and press Enter.
 
 ### Controls
 
-[mendo User Guide](../res/help_en.md)
+[mendo User Guide](res/help_en.md)
 
 ## Supported Markdown Elements
 
@@ -159,6 +158,6 @@ cmake --build build_tracy --config Release
 
 ## License
 
-[MIT](../LICENSE)
+[MIT](LICENSE)
 
-See [THIRD_PARTY_LICENSES.md](../THIRD_PARTY_LICENSES.md) for third-party library licenses.
+See [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) for third-party library licenses.

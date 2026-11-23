@@ -972,6 +972,40 @@ TEST(ZoomViewerZoom, StepsThroughStopsIncludingFit)
     EXPECT_FALSE(NextZoom(0.05f, 0.05f, -1));
 }
 
+// Ctrl+ホイールは 1 ノッチ 1 段。触覚板の半ノッチは貯めて 1 段にし、向きが変わったら端数を捨てる。
+TEST(ZoomViewerZoom, WheelAccumulatesPartialNotchesPerDirection)
+{
+    using zoom_viewer::WheelZoom;
+    WheelZoom wheel;
+    EXPECT_EQ(wheel.Accumulate(WHEEL_DELTA), 1);
+    EXPECT_EQ(wheel.Accumulate(-WHEEL_DELTA), -1);
+    // 2 ノッチまとめて届いたら 2 段。
+    EXPECT_EQ(wheel.Accumulate(WHEEL_DELTA * 2), 2);
+
+    // 半分ずつで 1 段。
+    WheelZoom touchpad;
+    EXPECT_EQ(touchpad.Accumulate(WHEEL_DELTA / 2), 0);
+    EXPECT_EQ(touchpad.Accumulate(WHEEL_DELTA / 2), 1);
+    // 逆向きに半分回したら、溜めていた分は捨てて段は動かない。
+    WheelZoom reversing;
+    EXPECT_EQ(reversing.Accumulate(WHEEL_DELTA / 2), 0);
+    EXPECT_EQ(reversing.Accumulate(-WHEEL_DELTA / 2), 0);
+    EXPECT_EQ(reversing.Accumulate(-WHEEL_DELTA / 2), -1);
+}
+
+// 端数は 0 や複数ノッチの回をまたいでも持ち越す。
+TEST(ZoomViewerZoom, WheelKeepsRemainderAcrossWholeAndZeroDeltas)
+{
+    zoom_viewer::WheelZoom wheel;
+    EXPECT_EQ(wheel.Accumulate(30), 0);
+    EXPECT_EQ(wheel.Accumulate(0), 0);
+    EXPECT_EQ(wheel.Accumulate(240), 2);
+    EXPECT_EQ(wheel.Accumulate(90), 1);
+    EXPECT_EQ(wheel.Accumulate(-150), -1);
+    EXPECT_EQ(wheel.Accumulate(0), 0);
+    EXPECT_EQ(wheel.Accumulate(-90), -1);
+}
+
 // ===== DiagramCache =====
 
 // 描画命令が size バイトの項目 (表示していない図)。

@@ -31,6 +31,12 @@ float FitZoom(float view_width, float view_height, float natural_width, float na
 // 端なら nullopt。
 std::optional<float> NextZoom(float zoom, float fit_zoom, int dir) noexcept;
 
+// 高精度ホイールの端数を次のノッチに持ち越す。1 ノッチ未満の回転で倍率が動かないようにする。
+struct WheelZoom {
+    int remainder = 0;
+    int Accumulate(int delta) noexcept;
+};
+
 } // namespace zoom_viewer
 
 // ZoomViewer が拡大表示の窓に頼む操作。本物の窓は開くと前面を取るので、テストは窓を作らない実装を差し込む。
@@ -163,6 +169,10 @@ private:
     }
     // 窓の中央に見えている点を動かさずに倍率を変える。
     void SetZoom(float zoom);
+    // anchor の下に見えている点を動かさずに倍率を変える。
+    void SetZoomAt(float zoom, D2D1_POINT_2F anchor);
+    // Ctrl を押したホイールの 1 回分。端数は次のノッチに持ち越す。
+    void ZoomByWheel(int delta, D2D1_POINT_2F anchor);
     // 中身を差し替える。同じ種類なら位置とボタンで変えた倍率を保ち、違えば全体表示にする。
     template <class Content>
     void Replace(Content content)
@@ -216,6 +226,8 @@ private:
     float fit_zoom_ = 1.0f;
     // ボタンやキーで変えた倍率。無ければ全体表示で、窓の大きさに追従する。
     std::optional<float> manual_zoom_;
+    // Ctrl を押したホイールの端数。押していないホイール・キーで倍率を変えたら捨てる。
+    zoom_viewer::WheelZoom wheel_zoom_;
     // 中身を余白込みで並べた面の、窓の左上が指す位置。
     float scroll_x_ = 0.0f;
     float scroll_y_ = 0.0f;
